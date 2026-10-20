@@ -1,0 +1,115 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Space Grotesk', 'Inter', ui-sans-serif, sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: #0b1020;
+  color: #e2e8f0;
+}
+
+.glass {
+  background: rgb(15 23 42 / 0.78);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgb(148 163 184 / 0.16);
+}
+
+.btn-primary,
+.btn-ghost {
+  @apply inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40;
+}
+.btn-primary {
+  @apply bg-emerald-400 text-slate-950 hover:bg-emerald-300;
+}
+.btn-ghost {
+  @apply text-slate-300 hover:bg-white/10 hover:text-white;
+}
+.btn-ghost.active {
+  @apply bg-white/15 text-white;
+}
+.input {
+  @apply w-full rounded-lg border border-white/10 bg-slate-900/80 px-3 py-1.5 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-emerald-400/60;
+}
+
+/* Map markers */
+.stop-marker {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  background: #0f172a;
+  color: #fff;
+  font: 600 11px/22px 'Inter', sans-serif;
+  text-align: center;
+  cursor: pointer;
+  box-shadow: 0 0 0 3px rgb(52 211 153 / 0.35), 0 4px 12px rgb(0 0 0 / 0.5);
+  transition: transform 0.2s, opacity 0.4s, box-shadow 0.2s;
+  padding: 0;
+}
+.stop-marker.has-photo {
+  width: 46px;
+  height: 46px;
+  background-size: cover;
+  background-position: center;
+  border-width: 3px;
+}
+.stop-marker[data-count]::after {
+  content: attr(data-count);
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #34d399;
+  color: #022c22;
+  font: 700 10px/18px 'Inter', sans-serif;
+}
+.stop-marker:hover {
+  transform: scale(1.12);
+}
+.stop-marker.selected {
+  box-shadow: 0 0 0 4px #34d399, 0 0 24px rgb(52 211 153 / 0.8);
+}
+.stop-marker.pending {
+  opacity: 0.15;
+  transform: scale(0.7);
+}
+.loose-marker {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 2px dashed #fbbf24;
+  background: #1e293b center / cover;
+  cursor: pointer;
+  opacity: 0.85;
+  padding: 0;
+}
+
+.maplibregl-ctrl-attrib {
+  font-size: 10px;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.pop-in {
+  animation: pop-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+input[type='range'] {
+  accent-color: #34d399;
+}

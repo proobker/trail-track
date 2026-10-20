@@ -1,0 +1,3 @@
+# Google OAuth Web client ID (Google Cloud Console → APIs & Services → Credentials).
+# Enable the "Google Photos Picker API" and add http://localhost:5173 as an authorized JavaScript origin.
+VITE_GOOGLE_CLIENT_ID=
