@@ -68,17 +68,25 @@ const blobToDataUrl = (b: Blob) =>
 export async function backupJSON(journeys: Journey[]): Promise<string> {
   const ids = new Set(journeys.flatMap((j) => j.stops.flatMap((s) => s.photoIds)));
   const photos = (await db.photos.bulkGet([...ids])).filter((p): p is Photo => !!p);
-  const serialised = await Promise.all(photos.map(async ({ thumbBlob, ...p }) => ({ ...p, thumb: thumbBlob ? await blobToDataUrl(thumbBlob) : undefined })));
+  const serialised = await Promise.all(
+    photos.map(async ({ thumbBlob, previewBlob, ...p }) => ({
+      ...p,
+      thumb: thumbBlob ? await blobToDataUrl(thumbBlob) : undefined,
+      preview: previewBlob ? await blobToDataUrl(previewBlob) : undefined,
+    })),
+  );
   return JSON.stringify({ app: 'trail-track', version: 1, exportedAt: new Date().toISOString(), journeys, photos: serialised });
 }
 
 export async function restoreBackup(text: string): Promise<number> {
   const data = JSON.parse(text);
   if (data.app !== 'trail-track' || !Array.isArray(data.journeys)) throw new Error('This is not a Trail Track backup');
+  const toBlob = async (u?: string) => (typeof u === 'string' && u.startsWith('data:image/') ? (await fetch(u)).blob() : undefined);
   const photos: Photo[] = await Promise.all(
-    (data.photos ?? []).map(async ({ thumb, ...p }: Photo & { thumb?: string }) => ({
+    (data.photos ?? []).map(async ({ thumb, preview, ...p }: Photo & { thumb?: string; preview?: string }) => ({
       ...p,
-      thumbBlob: typeof thumb === 'string' && thumb.startsWith('data:image/') ? await (await fetch(thumb)).blob() : undefined,
+      thumbBlob: await toBlob(thumb),
+      previewBlob: await toBlob(preview),
     })),
   );
   await db.transaction('rw', db.photos, db.journeys, async () => {

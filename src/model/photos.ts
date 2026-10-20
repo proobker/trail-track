@@ -7,15 +7,24 @@ import type { Journey, Photo } from './types';
 const usePhotoCache = create<{ photos: Map<string, Photo> }>(() => ({ photos: new Map() }));
 const urls = new Map<string, string>();
 
-export function thumbUrl(p: Photo | undefined): string | undefined {
-  if (!p?.thumbBlob) return undefined;
-  let url = urls.get(p.id);
+function blobUrl(key: string, blob?: Blob): string | undefined {
+  if (!blob) return undefined;
+  let url = urls.get(key);
   if (!url) {
-    url = URL.createObjectURL(p.thumbBlob);
-    urls.set(p.id, url);
+    url = URL.createObjectURL(blob);
+    urls.set(key, url);
   }
   return url;
 }
+
+/** Small image for markers and lists. */
+export const thumbUrl = (p?: Photo) => (p ? blobUrl(`t:${p.id}`, p.thumbBlob ?? p.previewBlob) : undefined);
+
+/** Large image for the lightbox and playback; falls back to the thumbnail for older imports. */
+export const previewUrl = (p?: Photo) => (p ? (blobUrl(`p:${p.id}`, p.previewBlob) ?? thumbUrl(p)) : undefined);
+
+/** Everything currently cached, keyed by photo id. */
+export const journeyPhotos = () => usePhotoCache.getState().photos;
 
 export async function savePhotos(photos: Photo[]) {
   await db.photos.bulkPut(photos);

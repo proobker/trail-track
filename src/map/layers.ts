@@ -30,7 +30,7 @@ export function stopsData(j?: Journey): FeatureCollection<Point> {
 
 /** Adds all trail sources and layers. Safe to call again after a style change. */
 export function addTrailLayers(map: MlMap) {
-  for (const id of ['trail', 'drawn', 'stops', 'head', 'draft']) {
+  for (const id of ['world', 'world-points', 'trail', 'drawn', 'stops', 'head', 'draft', 'hover']) {
     if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: EMPTY, lineMetrics: id === 'drawn' });
   }
   const line = (id: string, source: string, paint: Record<string, unknown>, filter?: ExpressionSpecification) => {
@@ -38,10 +38,33 @@ export function addTrailLayers(map: MlMap) {
     map.addLayer({ id, type: 'line', source, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: paint as never, ...(filter ? { filter } : {}) });
   };
 
+  // World view: every journey faded, a heatmap of where you've been, and a hover highlight.
+  if (!map.getLayer('world-heat')) {
+    map.addLayer({
+      id: 'world-heat',
+      type: 'heatmap',
+      source: 'world-points',
+      maxzoom: 12,
+      paint: {
+        'heatmap-weight': ['interpolate', ['linear'], ['get', 'photos'], 0, 0.4, 10, 1],
+        'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 0, 0.8, 12, 2.5],
+        'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 0, 8, 12, 28],
+        'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 8, 0.85, 12, 0],
+        // Sequential single-hue ramp (blue), transparent at zero density.
+        'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(57,135,229,0)', 0.2, '#184f95', 0.45, '#2a78d6', 0.7, '#6da7ec', 1, '#cde2fb'],
+      },
+    });
+  }
+  line('world-trails', 'world', { 'line-color': modeColor, 'line-width': ['interpolate', ['linear'], ['zoom'], 2, 2, 10, 4], 'line-opacity': 0.9 });
+  line('world-highlight', 'world', { 'line-color': '#ffffff', 'line-width': 4, 'line-opacity': 0.9, 'line-blur': 0.5 }, ['==', ['get', 'journeyId'], '']);
+  line('world-hit', 'world', { 'line-color': '#000', 'line-width': 16, 'line-opacity': 0 });
+
   // Full route underneath, faint while the animation is drawing the rest.
   line('trail-ghost', 'trail', { 'line-color': modeColor, 'line-width': 3, 'line-opacity': 0.22 });
   line('trail-selected', 'trail', { 'line-color': '#ffffff', 'line-width': 12, 'line-opacity': 0.35, 'line-blur': 2 }, ['==', ['get', 'id'], '']);
-  line('trail-glow', 'drawn', { 'line-color': modeColor, 'line-width': 12, 'line-blur': 8, 'line-opacity': 0.55 });
+  // Two glow passes: a wide soft halo and a tighter bright one.
+  line('trail-glow-wide', 'drawn', { 'line-color': modeColor, 'line-width': 22, 'line-blur': 16, 'line-opacity': 0.28 });
+  line('trail-glow', 'drawn', { 'line-color': modeColor, 'line-width': 9, 'line-blur': 4, 'line-opacity': 0.7 });
   line('trail-core', 'drawn', { 'line-color': modeColor, 'line-width': 4 }, ['in', ['get', 'mode'], ['literal', SOLID]]);
   for (const m of DASHED) {
     line(`trail-core-${m}`, 'drawn', { 'line-color': modeColor, 'line-width': 3.5, 'line-dasharray': MODE_META[m].dash }, ['==', ['get', 'mode'], m]);
@@ -59,6 +82,14 @@ export function addTrailLayers(map: MlMap) {
       paint: { 'circle-radius': 5, 'circle-color': '#0f172a', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 },
     });
   }
+  if (!map.getLayer('hover-dot')) {
+    map.addLayer({
+      id: 'hover-dot',
+      type: 'circle',
+      source: 'hover',
+      paint: { 'circle-radius': 7, 'circle-color': '#3987e5', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2.5 },
+    });
+  }
   if (!map.getLayer('head-glow')) {
     map.addLayer({
       id: 'head-glow',
@@ -73,6 +104,22 @@ export function addTrailLayers(map: MlMap) {
       paint: { 'circle-radius': 6, 'circle-color': '#ffffff', 'circle-stroke-color': modeColor, 'circle-stroke-width': 3 },
     });
   }
+}
+
+/** All journeys' legs (tagged with their journey) and stops, for the world view. */
+export function worldData(journeys: Journey[]): { lines: FeatureCollection<LineString>; points: FeatureCollection<Point> } {
+  return {
+    lines: {
+      type: 'FeatureCollection',
+      features: journeys.flatMap((j) => j.segments.map((s) => ({ type: 'Feature' as const, properties: { journeyId: j.id, mode: s.mode }, geometry: s.geometry }))),
+    },
+    points: {
+      type: 'FeatureCollection',
+      features: journeys.flatMap((j) =>
+        j.stops.map((s) => ({ type: 'Feature' as const, properties: { journeyId: j.id, photos: s.photoIds.length }, geometry: { type: 'Point' as const, coordinates: [s.lng, s.lat] } })),
+      ),
+    },
+  };
 }
 
 export function setData(map: MlMap, source: string, data: FeatureCollection) {

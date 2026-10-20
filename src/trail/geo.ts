@@ -1,3 +1,5 @@
+import type { LineString } from 'geojson';
+
 const R = 6371008.8;
 const rad = (d: number) => (d * Math.PI) / 180;
 
@@ -14,3 +16,5 @@ export function lineMetres(coords: [number, number][]): number {
   for (let i = 1; i < coords.length; i++) total += metres(coords[i - 1], coords[i]);
   return total;
 }
+
+export const straightLine = (a: [number, number], b: [number, number]): LineString => ({ type: 'LineString', coordinates: [a, b] });

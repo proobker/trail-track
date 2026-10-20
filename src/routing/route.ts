@@ -2,6 +2,8 @@ import greatCircle from '@turf/great-circle';
 import type { LineString, Position } from 'geojson';
 import { db } from '../model/db';
 import type { Mode, Routing, Stop } from '../model/types';
+import { makeThrottle } from '../util/throttle';
+import { straightLine } from '../trail/geo';
 
 type LngLat = [number, number];
 
@@ -17,7 +19,7 @@ export interface RouteResult {
   routing: Routing;
 }
 
-export const straightLine = (a: LngLat, b: LngLat): LineString => ({ type: 'LineString', coordinates: [a, b] });
+export { straightLine };
 
 /** Great-circle arc; longitudes are unwrapped so arcs across the antimeridian stay one LineString. */
 export function arc(a: LngLat, b: LngLat, npoints = 96): LineString {
@@ -34,15 +36,8 @@ export function arc(a: LngLat, b: LngLat, npoints = 96): LineString {
   return { type: 'LineString', coordinates: out };
 }
 
-let queue: Promise<unknown> = Promise.resolve();
-const MIN_GAP_MS = 1000;
-
-/** Serialises calls to the public OSRM server to roughly one per second. */
-function throttled<T>(fn: () => Promise<T>): Promise<T> {
-  const run = queue.then(fn);
-  queue = run.catch(() => undefined).then(() => new Promise((r) => setTimeout(r, MIN_GAP_MS)));
-  return run;
-}
+/** The public OSRM server asks for roughly one request per second. */
+const throttled = makeThrottle(1000);
 
 async function osrm(profile: string, a: LngLat, b: LngLat): Promise<LngLat[]> {
   const key = `${profile}:${a.map((n) => n.toFixed(5))};${b.map((n) => n.toFixed(5))}`;

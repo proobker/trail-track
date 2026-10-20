@@ -4,7 +4,10 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "build:share": "vite build -c vite.share.config.ts --logLevel warn",
+    "predev": "npm run build:share",
     "dev": "vite",
+    "prebuild": "npm run build:share",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
@@ -21,6 +24,7 @@
     "@zip.js/zip.js": "^2.24.0",
     "dexie": "^4.4.6",
     "exifr": "^7.1.3",
+    "lucide-react": "^1.60.0",
     "maplibre-gl": "^6.15.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

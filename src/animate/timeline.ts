@@ -6,6 +6,8 @@ type LngLat = [number, number];
 
 interface Track {
   segmentId: string;
+  /** Index of the stop this segment leaves from. */
+  fromStop: number;
   mode: Mode;
   coords: LngLat[];
   /** Cumulative distance in metres at each coordinate. */
@@ -26,7 +28,7 @@ export interface Timeline {
 
 export interface Frame {
   drawn: FeatureCollection<LineString>;
-  head?: { coord: LngLat; bearing: number; mode: Mode; track: number };
+  head?: { coord: LngLat; bearing: number; mode: Mode; track: number; /** Eased progress along the current leg. */ frac: number };
   /** Index of the stop the head is pausing at, if any. */
   pauseStop?: number;
   /** Index of the most recently reached stop. */
@@ -43,7 +45,7 @@ export function buildTimeline(j: Journey): Timeline {
     const coords = s.geometry.coordinates as LngLat[];
     const cum = [0];
     for (let i = 1; i < coords.length; i++) cum.push(cum[i - 1] + metres(coords[i - 1], coords[i]));
-    return { segmentId: s.id, mode: s.mode, coords, cum, length: cum[cum.length - 1], toStop: index.get(s.toStopId) ?? 0 };
+    return { segmentId: s.id, fromStop: index.get(s.fromStopId) ?? 0, mode: s.mode, coords, cum, length: cum[cum.length - 1], toStop: index.get(s.toStopId) ?? 0 };
   });
   const items: TimelineItem[] = [];
   let t = 0;
@@ -73,6 +75,17 @@ export function sliceTrack(tr: Track, frac: number): LngLat[] {
   const a = tr.coords[i - 1];
   const b = tr.coords[i];
   return [...tr.coords.slice(0, i), [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]];
+}
+
+/** Clock time at the head: interpolated between the leg's two stop times when both are known. */
+export function frameTime(j: Journey, tl: Timeline, f: Frame): number | undefined {
+  if (!f.head) return j.stops[f.pauseStop ?? f.reachedStop]?.arrivedAt;
+  const tr = tl.tracks[f.head.track];
+  const a = j.stops[tr.fromStop]?.arrivedAt;
+  const b = j.stops[tr.toStop]?.arrivedAt;
+  if (a == null) return b;
+  if (b == null || b < a) return a;
+  return a + (b - a) * f.head.frac;
 }
 
 function bearing(a: LngLat, b: LngLat): number {
@@ -114,7 +127,7 @@ export function sample(tl: Timeline, progress: number): Frame {
     if (coords.length >= 2) features.push(lineFeature(tr, coords));
     const end = coords[coords.length - 1];
     const back = sliceTrack(tr, Math.max(0, eased - 0.02));
-    head = { coord: end, bearing: bearing(back[back.length - 1], end), mode: tr.mode, track: it.track };
+    head = { coord: end, bearing: bearing(back[back.length - 1], end), mode: tr.mode, track: it.track, frac: eased };
   }
   return { drawn: { type: 'FeatureCollection', features }, head, pauseStop, reachedStop };
 }

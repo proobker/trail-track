@@ -64,7 +64,7 @@ export async function pickFromGooglePhotos(onStatus?: (msg: string) => void, sig
         photo: { id: uid(), source: 'picker' as const, takenAt: Date.parse(m.createTime), people: [], fileName: m.mediaFile.filename },
         getBlob: async () => {
           // baseUrl expires after ~60 minutes; thumbnails are made right after picking.
-          const res = await fetch(`${m.mediaFile.baseUrl}=w512-h512`, { headers: { Authorization: `Bearer ${token}` } });
+          const res = await fetch(`${m.mediaFile.baseUrl}=w1280-h1280`, { headers: { Authorization: `Bearer ${token}` } });
           if (!res.ok) throw new Error(`Could not download ${m.mediaFile.filename}`);
           return res.blob();
         },

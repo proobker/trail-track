@@ -1,3 +1,4 @@
+import { ArrowLeft, Cloud, FolderOpen, Images, Loader2, PencilLine, Route, Archive, X, type LucideIcon } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { googleConfigured, signIn, useAuth } from '../auth/google';
 import { materialize, type PhotoCandidate } from '../import/candidate';
@@ -11,15 +12,16 @@ import { activeJourney, addPhotosToJourney, createJourney, notify, setTool, useS
 import { clusterPhotos } from '../trail/cluster';
 import { filterPhotos, hasLocation, peopleIndex } from '../trail/filter';
 import { newJourney, reconcileSegments } from '../trail/journey';
+import { findOutliers } from '../trail/outliers';
 
 type Source = 'takeout' | 'upload' | 'picker' | 'track' | 'manual';
 
-const SOURCES: { id: Source; icon: string; title: string; body: string }[] = [
-  { id: 'takeout', icon: '📦', title: 'Google Takeout', body: 'Your Google Photos export. Brings location and the people Google recognised, so you can filter by person.' },
-  { id: 'upload', icon: '🖼️', title: 'Upload photos', body: 'Photos from your phone or camera. Location is read from each photo.' },
-  { id: 'picker', icon: '☁️', title: 'Google Photos', body: 'Pick photos directly. Google removes location, so they are placed on the trail by time.' },
-  { id: 'track', icon: '🧭', title: 'Import a track', body: 'A KML, GPX or GeoJSON file from Google Maps, Strava, Garmin and others.' },
-  { id: 'manual', icon: '✏️', title: 'Draw it myself', body: 'Click the map to add stops and choose how you travelled between them.' },
+const SOURCES: { id: Source; icon: LucideIcon; title: string; body: string }[] = [
+  { id: 'takeout', icon: Archive, title: 'Google Takeout', body: 'Your Google Photos export. Brings location and the people Google recognised, so you can filter by person.' },
+  { id: 'upload', icon: Images, title: 'Upload photos', body: 'Photos from your phone or camera. Location is read from each photo.' },
+  { id: 'picker', icon: Cloud, title: 'Google Photos', body: 'Pick photos directly. Google removes location, so they are placed on the trail by time.' },
+  { id: 'track', icon: Route, title: 'Import a track', body: 'A KML, GPX or GeoJSON file from Google Maps, Strava, Garmin and others.' },
+  { id: 'manual', icon: PencilLine, title: 'Draw it myself', body: 'Click the map to add stops and choose how you travelled between them.' },
 ];
 
 const toDay = (t: number) => {
@@ -133,8 +135,16 @@ export function Wizard() {
       const keep = includeLoose ? matching : matching.filter((c) => hasLocation(c.photo));
       const photos = await materialize(keep, (d, t) => setBusy(`Preparing photos… ${d} / ${t}`));
       await savePhotos(photos);
-      const stops = clusterPhotos(photos);
+      let stops = clusterPhotos(photos);
       const loose = photos.filter((p) => !hasLocation(p)).map((p) => p.id);
+      // Photos whose GPS jumps far away and straight back are glitches: leave them unplaced.
+      const glitches = findOutliers(stops);
+      if (glitches.size) {
+        const moved = stops.filter((st) => glitches.has(st.id)).flatMap((st) => st.photoIds);
+        loose.push(...moved);
+        stops = stops.filter((st) => !glitches.has(st.id));
+        setTimeout(() => notify(`${moved.length} photo${moved.length === 1 ? '' : 's'} had suspicious GPS and ${moved.length === 1 ? 'was' : 'were'} moved to “needs a place”`), 3800);
+      }
       if (target === 'current' && current) {
         addPhotosToJourney(stops, loose);
         notify(`Added ${photos.length} photos to ${current.title}`);
@@ -148,15 +158,15 @@ export function Wizard() {
     });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={(e) => e.target === e.currentTarget && !busy && close()}>
-      <div className="glass pop-in max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl p-6 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm sm:p-4" onClick={(e) => e.target === e.currentTarget && !busy && close()}>
+      <div className="glass-strong pop-in max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-3xl p-5 shadow-2xl sm:p-7">
         <div className="mb-4 flex items-start justify-between">
           <div>
             <h2 className="font-display text-2xl font-semibold text-white">{cands ? 'Choose what to map' : 'New journey'}</h2>
             <p className="text-sm text-slate-400">{cands ? `${cands.length} photos found` : 'Where should the trail come from?'}</p>
           </div>
-          <button className="btn-ghost" onClick={close} disabled={!!busy} aria-label="Close">
-            ✕
+          <button className="icon-btn h-9 w-9" onClick={close} disabled={!!busy} aria-label="Close">
+            <X size={18} />
           </button>
         </div>
 
@@ -171,7 +181,7 @@ export function Wizard() {
                   onClick={() => choose(s.id)}
                   disabled={!!busy}
                 >
-                  <div className="mb-1 text-2xl">{s.icon}</div>
+                  <s.icon size={22} className="mb-2 text-emerald-300" />
                   <div className="font-medium text-white">{s.title}</div>
                   <div className="text-xs leading-relaxed text-slate-400">{s.body}</div>
                 </button>
@@ -198,7 +208,7 @@ export function Wizard() {
                     const files = await pickFiles('', { directory: true });
                     if (files.length) await withBusy('Reading Takeout…', async () => gotCandidates(await scanTakeout(files, setBusy)));
                   }}>
-                    Choose extracted folder
+                    <FolderOpen size={15} /> Choose extracted folder
                   </button>
                 </div>
               </div>
@@ -319,7 +329,7 @@ export function Wizard() {
               </div>
               <div className="flex gap-2">
                 <button className="btn-ghost" disabled={!!busy} onClick={reset}>
-                  Back
+                  <ArrowLeft size={15} /> Back
                 </button>
                 <button className="btn-primary" disabled={!!busy || !(includeLoose ? matching.length : located)} onClick={create}>
                   {target === 'current' ? 'Add photos' : 'Build trail'} →
@@ -331,7 +341,7 @@ export function Wizard() {
 
         {busy && (
           <div className="mt-4 flex items-center gap-3 text-sm text-emerald-300">
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-300 border-t-transparent" />
+            <Loader2 size={16} className="animate-spin" />
             {busy}
           </div>
         )}

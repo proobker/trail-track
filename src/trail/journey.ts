@@ -1,7 +1,6 @@
 import { uid, type Journey, type Mode, type Segment, type Stop } from '../model/types';
-import { straightLine } from '../routing/route';
 import { inferMode } from './inferMode';
-import { lineMetres } from './geo';
+import { lineMetres, straightLine } from './geo';
 
 /**
  * Rebuilds segments for consecutive stops. A segment survives when its endpoints are unchanged

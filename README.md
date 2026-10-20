@@ -10,7 +10,7 @@ Requires Node.js 20+.
 npm install
 npm run dev        # http://localhost:5173
 npm test           # unit tests
-npm run build      # production build in dist/
+npm run build      # production build in dist/ (also builds the share-page viewer)
 ```
 
 ## Where trails come from
@@ -27,15 +27,67 @@ Google shut down full-library access to Google Photos in March 2025, which is wh
 
 ## Editing a trail
 
-- Each leg has its own transport mode. Walk, bike, car and bus follow real roads (OSRM). Flights are drawn as great-circle arcs. Train and boat use straight lines, or you can draw the path by hand.
-- Modes are guessed from the speed between photos. Click an icon to change one.
-- Drag stops while in "Add stops" mode. Reorder or rename them in the side panel.
-- Photos without location show as dashed thumbnails. Pin each one on the map, or attach it to the stop nearest in time.
-- Export as GPX, KML or GeoJSON. Use Back up / Restore to move everything, including thumbnails, to another browser.
+- **Transport mode per leg.** Click a leg's mode chip to change it.
+  - Walk, bike, car and bus follow real roads (OSRM).
+  - Flights are drawn as great-circle arcs.
+  - Train and boat use straight lines, or you can draw the path by hand.
+  - Modes are guessed from the speed between photos; long overnight gaps are judged by distance instead.
+- **Stops.**
+  - Click the map in "Add stops" mode, or search for a place and press "+ Stop" (or Shift+Enter).
+  - Drag stops to move them.
+  - Each stop's ⋯ menu can rename, reorder, merge with the next stop, split by time gap, or remove it.
+- **Undo / redo** for every edit (Ctrl+Z / Ctrl+Shift+Z).
+- **GPS glitch cleanup.** On import, a photo whose location jumps far away and straight back is set aside under "needs a place" instead of distorting the trail.
+- **Photos without location** show as dashed thumbnails. Pin each one on the map, or attach it to the stop nearest in time.
 
-## Playback
+## Journal
 
-Press ▶ and the trail draws itself with a glowing line, a camera that follows along, and photo cards at each stop. You can change the speed, turn off camera follow, or press ● Rec to save the animation as a video. The recording captures the map canvas, so the HTML photo bubbles are not included.
+- Stops are named automatically from the place they're at (reverse geocoding via Photon), e.g. "Monastery of the Hieronymites · Lisbon, Portugal".
+- The route list is grouped by day.
+- Each stop can hold a note, which is also shown during playback.
+- A full-screen photo viewer opens from the stop list, the map or the playback card; use ←/→ to browse.
+
+## Stats & world map
+
+- **Stats tab:**
+  - distance by transport mode;
+  - a day-by-day table;
+  - an elevation profile for the whole trip or one day, from AWS terrain tiles (hover it to see the point on the map);
+  - the cities and countries you visited.
+- **All journeys:** every trip on one map, with a heatmap of where you've been and totals for distance, countries, cities and photos.
+
+## Playback & sharing
+
+Press ▶ (or Space) and the trail draws itself:
+- a glowing line, with a marker showing how you were travelling;
+- a camera that follows along;
+- photo cards at each stop, and the date and time in the player bar.
+
+From the **Share** tab:
+
+- **Video:** landscape (16:9, 1080p) or portrait (9:16). The recording includes a title card, the photo bubbles and photo cards, and a closing stats card. Chrome saves MP4; other browsers save WebM.
+- **Interactive page:** a single `.html` file containing the map, the animation and your photos. Anyone can open it in a browser, even straight from their downloads folder. It loads map tiles and MapLibre from the internet.
+- **Map files:** GPX, KML, GeoJSON.
+
+Use Back up / Restore in the sidebar to move everything, including photos, to another browser.
+
+## Keyboard shortcuts
+
+Press `?` in the app for the full list.
+
+| Key | Action |
+| --- | --- |
+| Space | play / pause |
+| A / V | add stops / explore |
+| ← / → | previous / next stop |
+| L | open the selected stop's photos |
+| F | fit the journey in view |
+| Delete | remove the selected stop |
+
+## Layout
+
+- On desktop, the journeys sidebar collapses to an icon rail and the journey panel can be hidden.
+- On phones, the sidebar becomes a drawer and the panel a bottom sheet you can drag between three heights.
 
 ## Google sign-in (optional)
 
@@ -53,7 +105,7 @@ Everything is stored in this browser (IndexedDB). Nothing is uploaded to a serve
 - OpenFreeMap: map tiles
 - Esri: satellite imagery
 - AWS Terrain Tiles: 3D terrain
-- Photon (komoot): place search
+- Photon (komoot): place search and place names
 - routing.openstreetmap.de: OSRM routes; only the coordinates of each leg are sent
 
 The public routing server is rate-limited, so routes are fetched about one per second and cached.

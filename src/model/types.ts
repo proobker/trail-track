@@ -11,7 +11,10 @@ export interface Photo {
   lng?: number;
   people: string[];
   fileName: string;
+  /** ~256px, for map markers and lists. */
   thumbBlob?: Blob;
+  /** ~1280px, for the lightbox and playback cards. */
+  previewBlob?: Blob;
 }
 
 export const MODES = ['walk', 'bike', 'car', 'bus', 'train', 'boat', 'flight'] as const;
@@ -25,9 +28,21 @@ export interface Stop {
   lng: number;
   arrivedAt?: number;
   label?: string;
+  /** Filled in by reverse geocoding. */
+  place?: Place;
+  note?: string;
   photoIds: string[];
   origin: 'photo' | 'manual' | 'import';
 }
+
+export interface Place {
+  name?: string;
+  city?: string;
+  country?: string;
+  countryCode?: string;
+}
+
+export const stopName = (s: Stop, index: number) => s.label ?? s.place?.name ?? s.place?.city ?? `Stop ${index + 1}`;
 
 export interface Segment {
   id: string;
@@ -53,14 +68,20 @@ export interface Journey {
   updatedAt: number;
 }
 
+/**
+ * Mode colours come from a validated categorical palette (dark steps). Any chart that puts
+ * modes side by side must use STACK_ORDER, the order the palette was validated in.
+ */
 export const MODE_META: Record<Mode, { label: string; icon: string; color: string; dash?: number[] }> = {
-  walk: { label: 'Walk', icon: '🚶', color: '#22c55e' },
-  bike: { label: 'Bike', icon: '🚲', color: '#eab308' },
-  car: { label: 'Car', icon: '🚗', color: '#f97316' },
-  bus: { label: 'Bus', icon: '🚌', color: '#ef4444' },
-  train: { label: 'Train', icon: '🚆', color: '#a855f7', dash: [2, 1] },
-  boat: { label: 'Boat', icon: '⛴️', color: '#06b6d4', dash: [1, 1] },
-  flight: { label: 'Flight', icon: '✈️', color: '#38bdf8', dash: [0.5, 2] },
+  walk: { label: 'Walk', icon: '🚶', color: '#199e70' },
+  bike: { label: 'Bike', icon: '🚲', color: '#c98500' },
+  car: { label: 'Car', icon: '🚗', color: '#d95926' },
+  bus: { label: 'Bus', icon: '🚌', color: '#e66767' },
+  train: { label: 'Train', icon: '🚆', color: '#9085e9', dash: [2, 1] },
+  boat: { label: 'Boat', icon: '⛴️', color: '#3987e5', dash: [1, 1] },
+  flight: { label: 'Flight', icon: '✈️', color: '#d55181', dash: [0.5, 2] },
 };
+
+export const STACK_ORDER: Mode[] = ['boat', 'car', 'walk', 'bike', 'flight', 'train', 'bus'];
 
 export const uid = () => crypto.randomUUID();

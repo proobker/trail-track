@@ -5,9 +5,13 @@ interface Prefs {
   base: BaseStyle;
   terrain: boolean;
   globe: boolean;
+  /** Desktop: whether the journeys sidebar is expanded or collapsed to an icon rail. */
+  sidebarOpen: boolean;
+  /** Desktop: whether the journey panel is shown. */
+  panelOpen: boolean;
 }
 
-const DEFAULTS: Prefs = { base: 'dark', terrain: false, globe: true };
+const DEFAULTS: Prefs = { base: 'dark', terrain: false, globe: true, sidebarOpen: true, panelOpen: true };
 
 function load(): Prefs {
   try {

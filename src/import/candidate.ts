@@ -6,21 +6,28 @@ export interface PhotoCandidate {
   getBlob?: () => Promise<Blob>;
 }
 
-const THUMB_PX = 512;
+const THUMB_PX = 256;
+const PREVIEW_PX = 1280;
 
-export async function makeThumb(blob: Blob, px = THUMB_PX): Promise<Blob | undefined> {
+function scaled(bmp: ImageBitmap, px: number): Promise<Blob | undefined> {
+  const scale = Math.min(1, px / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bmp.width * scale);
+  canvas.height = Math.round(bmp.height * scale);
+  canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  return new Promise((r) => canvas.toBlob((b) => r(b ?? undefined), 'image/jpeg', 0.82));
+}
+
+/** Decodes an image once and returns a marker-sized thumbnail and a lightbox-sized preview. */
+export async function makeImages(blob: Blob): Promise<{ thumbBlob?: Blob; previewBlob?: Blob }> {
   try {
     const bmp = await createImageBitmap(blob);
-    const scale = Math.min(1, px / Math.max(bmp.width, bmp.height));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(bmp.width * scale);
-    canvas.height = Math.round(bmp.height * scale);
-    canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    const [thumbBlob, previewBlob] = await Promise.all([scaled(bmp, THUMB_PX), scaled(bmp, PREVIEW_PX)]);
     bmp.close();
-    return await new Promise<Blob | undefined>((r) => canvas.toBlob((b) => r(b ?? undefined), 'image/jpeg', 0.82));
+    return { thumbBlob, previewBlob };
   } catch {
-    // Videos, HEIC and other formats the browser can't decode simply get no thumbnail.
-    return undefined;
+    // Videos, HEIC and other formats the browser can't decode simply get no images.
+    return {};
   }
 }
 
@@ -33,15 +40,15 @@ export async function materialize(cands: PhotoCandidate[], onProgress?: (done: n
     while (next < cands.length) {
       const i = next++;
       const c = cands[i];
-      let thumbBlob: Blob | undefined;
+      let images = {};
       if (c.getBlob) {
         try {
-          thumbBlob = await makeThumb(await c.getBlob());
+          images = await makeImages(await c.getBlob());
         } catch {
-          thumbBlob = undefined;
+          images = {};
         }
       }
-      out[i] = { ...c.photo, thumbBlob };
+      out[i] = { ...c.photo, ...images };
       onProgress?.(++done, cands.length);
     }
   };

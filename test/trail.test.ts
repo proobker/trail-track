@@ -59,6 +59,7 @@ describe('inferMode', () => {
   it('drives at road speed', () => expect(inferMode(a, stop({ lat: 0.7, lng: 0, arrivedAt: T0 + H }))).toBe('car'));
   it('flies long distances', () => expect(inferMode(a, stop({ lat: 10, lng: 0, arrivedAt: T0 + 2 * H }))).toBe('flight'));
   it('falls back on distance without times', () => expect(inferMode(stop({}), stop({ lat: 0.001 }))).toBe('walk'));
+  it('ignores speed across an overnight gap', () => expect(inferMode(a, stop({ lat: 0.27, lng: 0, arrivedAt: T0 + 17 * H }))).toBe('car'));
 });
 
 describe('placeUnlocated', () => {
