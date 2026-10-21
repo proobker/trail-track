@@ -14,6 +14,7 @@ export interface SidecarInfo {
   takenAt: number;
   lat?: number;
   lng?: number;
+  locationSource?: 'takeout-exif' | 'takeout-edited';
   people: string[];
   folder?: string;
 }
@@ -27,12 +28,14 @@ export function parseSidecar(json: unknown): SidecarInfo | undefined {
   const s = json as TakeoutSidecar;
   const ts = s.photoTakenTime?.timestamp ?? s.creationTime?.timestamp;
   if (!ts || !Number.isFinite(Number(ts))) return undefined;
-  const geo = validGeo(s.geoDataExif) ?? validGeo(s.geoData);
+  const exif = validGeo(s.geoDataExif);
+  const geo = exif ?? validGeo(s.geoData);
   return {
     title: s.title,
     takenAt: Number(ts) * 1000,
     lat: geo?.latitude,
     lng: geo?.longitude,
+    locationSource: geo ? (exif ? 'takeout-exif' : 'takeout-edited') : undefined,
     people: (s.people ?? []).map((p) => p.name?.trim()).filter((n): n is string => !!n),
     folder: s.googlePhotosOrigin?.mobileUpload?.deviceFolder?.localFolderName || undefined,
   };

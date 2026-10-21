@@ -5,6 +5,11 @@ import { previewUrl, usePhoto } from '../model/photos';
 import { stopName } from '../model/types';
 import { activeJourney, removePhotos, useStore } from '../store';
 
+const locationLabels = {
+  exif: 'Photo GPS', 'takeout-exif': 'Original photo GPS', 'takeout-edited': 'Google Photos location',
+  'timeline-path': 'Estimated from Timeline path', 'timeline-visit': 'Timeline visit', manual: 'Pinned on map',
+} as const;
+
 export function Lightbox() {
   const lb = useStore((s) => s.lightbox);
   const j = useStore(activeJourney);
@@ -63,7 +68,14 @@ export function Lightbox() {
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 p-4 text-sm text-slate-300" onClick={(e) => e.stopPropagation()}>
         {stop && <span className="font-medium text-white">{stopName(stop, stopIndex)}</span>}
         {photo && <span>{new Date(photo.takenAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>}
-        {photo?.locatedBy === 'timeline' && <span className="text-xs text-slate-400">Place from Google Timeline</span>}
+        {photo?.locationSource && (
+          <span className="text-xs text-slate-400">
+            {locationLabels[photo.locationSource]}
+            {photo.locationAccuracyM != null ? ` · reported ${Math.round(photo.locationAccuracyM)} m accuracy` : ''}
+            {photo.locationTimeGapMs != null ? ` · ${Math.round(photo.locationTimeGapMs / 60_000)} min from observation` : ''}
+          </span>
+        )}
+        {!photo?.locationSource && photo?.locatedBy === 'timeline' && <span className="text-xs text-slate-400">Estimated from Google Timeline</span>}
         {photo && photo.people.length > 0 && (
           <span className="inline-flex items-center gap-1">
             <Users size={14} /> {photo.people.join(', ')}

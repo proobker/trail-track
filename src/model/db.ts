@@ -11,11 +11,19 @@ export interface GeocacheRow {
   place: Place;
 }
 
+export interface TrailCacheRow {
+  key: string;
+  fetchedAt: number;
+  elements: unknown[];
+  usgsFeatures?: unknown[];
+}
+
 export const db = new Dexie('trail-track') as Dexie & {
   photos: EntityTable<Photo, 'id'>;
   journeys: EntityTable<Journey, 'id'>;
   routeCache: EntityTable<RouteCacheRow, 'key'>;
   geocache: EntityTable<GeocacheRow, 'key'>;
+  trailCache: EntityTable<TrailCacheRow, 'key'>;
 };
 
 db.version(1).stores({
@@ -25,3 +33,4 @@ db.version(1).stores({
 });
 
 db.version(2).stores({ geocache: 'key' });
+db.version(3).stores({ trailCache: 'key' });

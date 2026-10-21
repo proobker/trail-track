@@ -101,7 +101,7 @@ export function PhotosTab({ j, photos }: { j: Journey; photos: Map<string, Photo
       const locate = makeLocator(await readTimelineFiles(files));
       const placed = loose.flatMap((p) => {
         const at = locate(p);
-        return at ? [{ ...p, lat: at.lat, lng: at.lng, locatedBy: 'timeline' as const }] : [];
+        return at ? [{ ...p, lat: at.lat, lng: at.lng, locatedBy: 'timeline' as const, locationSource: at.via === 'visit' ? 'timeline-visit' as const : 'timeline-path' as const, locationAccuracyM: at.accuracyM, locationAccuracyLevel: at.accuracyM != null ? 'unspecified' as const : undefined, locationTimeGapMs: at.timeGapMs }] : [];
       });
       if (!placed.length) return notify('None of these photos fall within your Timeline data');
       await placeLoosePhotos(placed);

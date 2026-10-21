@@ -378,14 +378,14 @@ export function MapView() {
     });
 
     const loose = (journey.loosePhotoIds ?? []).map((id) => photos.get(id)).filter((p): p is Photo => !!p);
-    for (const pl of placeUnlocated(loose, journey.stops)) {
+    for (const pl of placeUnlocated(loose, journey)) {
       const p = photos.get(pl.photoId);
       const el = document.createElement('button');
       el.className = 'loose-marker';
       const url = thumbUrl(p);
       if (url) el.style.backgroundImage = `url(${url})`;
-      el.title = 'Placed by time — click to pin it exactly';
-      el.setAttribute('aria-label', 'Photo placed by time; click to pin it exactly');
+      el.title = `Approximate ${pl.method === 'route' ? 'route' : pl.method === 'stop' ? 'stop' : 'straight-line'} placement by time — click to pin it exactly`;
+      el.setAttribute('aria-label', el.title);
       el.addEventListener('click', (e) => {
         e.stopPropagation();
         setTool('pin', pl.photoId);

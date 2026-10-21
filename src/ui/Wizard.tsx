@@ -30,10 +30,10 @@ const DEFAULT_SKIP: PhotoKind[] = ['screenshot', 'document', 'saved'];
 type Source = 'takeout' | 'upload' | 'picker' | 'track' | 'manual';
 
 const SOURCES: { id: Source; icon: LucideIcon; title: string; body: string }[] = [
-  { id: 'takeout', icon: Archive, title: 'Google Takeout', body: 'Your Google Photos export. Brings location and the people Google recognised, so you can filter by person.' },
-  { id: 'upload', icon: Images, title: 'Upload photos', body: 'Photos from your phone or camera. Location is read from each photo.' },
-  { id: 'picker', icon: Cloud, title: 'Google Photos', body: 'Pick photos directly. Google removes location, so they are placed on the trail by time.' },
-  { id: 'track', icon: Route, title: 'Import a track', body: 'A KML, GPX or GeoJSON file from Google Maps, Strava, Garmin and others.' },
+  { id: 'takeout', icon: Archive, title: 'Google Takeout', body: 'Best for a photo library: includes Google Photos location sidecars and recognised people. Add an original GPX track for a more precise trail.' },
+  { id: 'upload', icon: Images, title: 'Upload photos', body: 'Original camera files may contain GPS and reported accuracy. Shared or compressed copies often lose location.' },
+  { id: 'picker', icon: Cloud, title: 'Google Photos', body: 'Pick photos directly. Google removes GPS here; use a track or Timeline to place them, or pin them manually.' },
+  { id: 'track', icon: Route, title: 'Import a track', body: 'Import a recorded KML, GPX or GeoJSON path for the best route shape. A few photo GPS points cannot resolve trail junctions.' },
   { id: 'manual', icon: PencilLine, title: 'Draw it myself', body: 'Click the map to add stops and choose how you travelled between them.' },
 ];
 
@@ -166,7 +166,7 @@ export function Wizard() {
           const at = hasLocation(c.photo) ? undefined : locate(c.photo);
           if (!at) return c;
           found++;
-          return { ...c, photo: { ...c.photo, lat: at.lat, lng: at.lng, locatedBy: 'timeline' as const } };
+          return { ...c, photo: { ...c.photo, lat: at.lat, lng: at.lng, locatedBy: 'timeline' as const, locationSource: at.via === 'visit' ? 'timeline-visit' as const : 'timeline-path' as const, locationAccuracyM: at.accuracyM, locationAccuracyLevel: at.accuracyM != null ? 'unspecified' as const : undefined, locationTimeGapMs: at.timeGapMs } };
         }),
       );
       if (found && target === 'current' && current) setTarget('new');

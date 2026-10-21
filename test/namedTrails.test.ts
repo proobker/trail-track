@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Journey } from '../src/model/types';
 import { newJourney } from '../src/trail/journey';
-import { findNearbyTrails, parseTrailCandidates, trailSearchArea } from '../src/trail/namedTrails';
+import { findNearbyTrails, parseTrailCandidates, parseUsgsCandidates, trailSearchArea } from '../src/trail/namedTrails';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -36,6 +36,22 @@ describe('named trail search', () => {
     expect(found[0].lines[0]).toEqual(stops);
   });
 
+  it('uses shaped route points when searching and ranking', () => {
+    const j = journey();
+    j.segments[0].geometry.coordinates = [[85.32, 27.71], [85.3225, 27.713], [85.325, 27.71]];
+    const area = trailSearchArea(j);
+    expect(area.bounds[2]).toBeGreaterThan(27.713);
+    expect(area.stops).toContainEqual([85.3225, 27.713]);
+  });
+
+  it('parses nearby USGS trail geometry as supplementary candidates', () => {
+    const found = parseUsgsCandidates([
+      { type: 'Feature', properties: { objectid: 42, name: 'Ridge Path', trailnumber: '7' }, geometry: { type: 'MultiLineString', coordinates: [[[-105, 40], [-104.999, 40]]] } },
+      { type: 'Feature', properties: { objectid: 43, name: 'Far Away' }, geometry: { type: 'LineString', coordinates: [[-110, 40], [-109, 40]] } },
+    ], [[-105, 40]]);
+    expect(found).toMatchObject([{ source: 'usgs', type: 'feature', id: 42, name: 'Ridge Path', ref: '7', nearStops: 1 }]);
+  });
+
   it('requests a bounded, user-initiated Overpass search', async () => {
     const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ elements: [
       { type: 'way', id: 5, tags: { name: 'Forest Walk' }, geometry: [{ lon: 85.32, lat: 27.71 }, { lon: 85.325, lat: 27.71 }] },
@@ -47,5 +63,17 @@ describe('named trail search', () => {
     expect(url).toBe('https://overpass-api.de/api/interpreter');
     expect(options.method).toBe('POST');
     expect(options.body.get('data')).toMatch(/out geom\(27\./);
+  });
+
+  it('shows USGS candidates when Overpass is unavailable in a US search', async () => {
+    const fetch = vi.fn().mockImplementation((url: string) => url.includes('overpass')
+      ? Promise.reject(new Error('Overpass unavailable'))
+      : Promise.resolve({ ok: true, json: async () => ({ features: [{ type: 'Feature', properties: { objectid: 42, name: 'Ridge Path', hikerpedestrian: 'Y', trailtype: 'Terra Trail' }, geometry: { type: 'LineString', coordinates: [[-105, 40], [-104.995, 40]] } }] }) }));
+    vi.stubGlobal('fetch', fetch);
+    const j = journey(-105, -104.995);
+    j.stops.forEach((s) => { s.lat = 40; });
+    j.segments[0].geometry.coordinates = [[-105, 40], [-104.995, 40]];
+    expect((await findNearbyTrails(j)).map((c) => c.name)).toEqual(['Ridge Path']);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });

@@ -77,6 +77,8 @@ export async function scanTakeout(files: File[], onProgress?: (msg: string) => v
         takenAt: info.takenAt,
         lat: info.lat,
         lng: info.lng,
+        locationSource: info.locationSource,
+        originalLocation: info.lat != null && info.lng != null ? { lat: info.lat, lng: info.lng } : undefined,
         people: info.people,
         fileName: imageName ?? info.title ?? nameOf(j.path),
         folder: info.folder,

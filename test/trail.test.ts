@@ -69,6 +69,11 @@ describe('clusterPhotos', () => {
     ]);
     expect(stops.map((s) => s.photoIds.length)).toEqual([2, 1]);
   });
+  it('keeps separate precise fixes on nearby parallel paths', () => {
+    const a = photo({ lat: 0, lng: 0, locationAccuracyM: 10, takenAt: T0 });
+    const b = photo({ lat: 0, lng: 0.00075, locationAccuracyM: 10, takenAt: T0 + 10 * 60_000 });
+    expect(clusterPhotos([a, b])).toHaveLength(2);
+  });
   it('uses a local near-duplicate fingerprint to tolerate modest GPS drift', () => {
     const first = photo({ lat: 0, lng: 0, visualHash: '0f0f0f0f0f0f0f0f', takenAt: T0 });
     const duplicate = photo({ lat: 0, lng: 0.0013, visualHash: '0f0f0f0f0f0f0f0e', takenAt: T0 + 5 * 60_000 });
@@ -114,6 +119,15 @@ describe('placeUnlocated', () => {
     const [before, after] = placeUnlocated([photo({ takenAt: T0 - H }), photo({ takenAt: T0 + 5 * H })], stops);
     expect(before.stopId).toBe(stops[0].id);
     expect(after.stopId).toBe(stops[1].id);
+  });
+  it('places a photo by distance along a shaped route', () => {
+    const j = newJourney('Bend', { stops });
+    j.segments = [{ id: 'bend', fromStopId: stops[0].id, toStopId: stops[1].id, mode: 'walk', routing: 'imported', geometry: { type: 'LineString', coordinates: [[0, 0], [0, 10], [20, 10]] } }];
+    const [placed] = placeUnlocated([photo({ takenAt: T0 + H })], j);
+    expect(placed.method).toBe('route');
+    expect(placed.lat).toBeCloseTo(10);
+    expect(placed.lng).toBeGreaterThan(0);
+    expect(placed.lng).toBeLessThan(20);
   });
   it('returns nothing without timed stops', () => {
     expect(placeUnlocated([photo({})], [stop({})])).toEqual([]);

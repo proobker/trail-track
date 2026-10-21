@@ -1,6 +1,7 @@
 import type { LineString } from 'geojson';
 
 export type PhotoSource = 'takeout' | 'upload' | 'picker';
+export type LocationSource = 'exif' | 'takeout-exif' | 'takeout-edited' | 'timeline-path' | 'timeline-visit' | 'manual';
 
 export interface Photo {
   id: string;
@@ -9,6 +10,14 @@ export interface Photo {
   takenAt: number;
   lat?: number;
   lng?: number;
+  /** Provenance and reported quality of the mapped coordinate. Older saved photos may omit these. */
+  locationSource?: LocationSource;
+  locationAccuracyM?: number;
+  locationAccuracyLevel?: '68' | '95' | 'unspecified';
+  /** Gap to the nearest Timeline observation for an inferred location. */
+  locationTimeGapMs?: number;
+  /** Original embedded/sidecar coordinate, kept apart from later inferred placement. */
+  originalLocation?: { lat: number; lng: number };
   people: string[];
   fileName: string;
   /**
@@ -70,7 +79,7 @@ export interface Journey {
   id: string;
   title: string;
   /** A named trail confirmed by the user; the journey geometry remains independent. */
-  namedTrail?: { source: 'osm'; type: 'relation' | 'way'; id: number; name: string; ref?: string };
+  namedTrail?: { source: 'osm' | 'usgs'; type: 'relation' | 'way' | 'feature'; id: number; name: string; ref?: string };
   /** Keep the title in sync with visited locations; false preserves an explicit name. */
   autoTitle?: boolean;
   dateFrom?: string;

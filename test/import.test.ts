@@ -33,11 +33,11 @@ describe('parseSidecar', () => {
       geoDataExif: { latitude: 47.5, longitude: 8.5 },
       people: [{ name: 'Ana' }, { name: ' ' }],
     });
-    expect(info).toEqual({ title: 'IMG_1.jpg', takenAt: 1714550400000, lat: 47.5, lng: 8.5, people: ['Ana'] });
+    expect(info).toMatchObject({ title: 'IMG_1.jpg', takenAt: 1714550400000, lat: 47.5, lng: 8.5, people: ['Ana'], locationSource: 'takeout-exif' });
   });
   it('treats 0,0 as no location and falls back to geoData', () => {
     expect(parseSidecar({ photoTakenTime: { timestamp: '1' }, geoDataExif: { latitude: 0, longitude: 0 }, geoData: { latitude: 0, longitude: 0 } })?.lat).toBeUndefined();
-    expect(parseSidecar({ photoTakenTime: { timestamp: '1' }, geoDataExif: { latitude: 0, longitude: 0 }, geoData: { latitude: 3, longitude: 4 } })?.lat).toBe(3);
+    expect(parseSidecar({ photoTakenTime: { timestamp: '1' }, geoDataExif: { latitude: 0, longitude: 0 }, geoData: { latitude: 3, longitude: 4 } })).toMatchObject({ lat: 3, locationSource: 'takeout-edited' });
   });
   it('ignores album metadata', () => {
     expect(parseSidecar({ title: 'Trip album', description: '' })).toBeUndefined();
@@ -189,9 +189,16 @@ describe('timeline', () => {
     expect(sem[0]).toMatchObject({ lat: 48.8584, end: Date.parse('2024-05-12T09:00:00Z') });
   });
 
+  it('keeps reported accuracy and time gap for a nearby Timeline fix', () => {
+    const t = Date.parse('2024-05-12T07:00:00Z');
+    const fixes = parseTimeline({ rawSignals: [{ position: { LatLng: '48.8584°, 2.2945°', accuracyMeters: 18, timestamp: '2024-05-12T07:00:00Z' } }] });
+    expect(fixes[0].accuracyM).toBe(18);
+    expect(makeLocator(fixes)({ takenAt: t + 5 * 60_000 })).toMatchObject({ method: 'nearest', accuracyM: 18, timeGapMs: 5 * 60_000 });
+  });
+
   it('places photos by visit, then path, then not at all', () => {
     const locate = makeLocator(prepareFixes(parseTimeline(android)));
-    expect(locate({ takenAt: Date.parse('2024-05-12T08:00:00Z') })).toEqual({ lat: 48.8584, lng: 2.2945, via: 'visit' });
+    expect(locate({ takenAt: Date.parse('2024-05-12T08:00:00Z') })).toEqual({ lat: 48.8584, lng: 2.2945, via: 'visit', method: 'visit', accuracyM: undefined });
     const mid = locate({ takenAt: Date.parse('2024-05-12T09:30:00Z') })!;
     expect(mid.via).toBe('path');
     expect(mid.lat).toBeCloseTo(48.87);

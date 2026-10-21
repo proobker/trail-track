@@ -337,6 +337,8 @@ export function setSegmentGeometry(segId: string, geometry: LineString) {
 export function pinPhoto(photoId: string, takenAt: number, lng: number, lat: number) {
   const j = activeJourney();
   if (!j) return;
+  const photo = journeyPhotos().get(photoId);
+  if (photo) void savePhotos([{ ...photo, lat, lng, locationSource: 'manual', locationAccuracyM: undefined, locationAccuracyLevel: undefined }]);
   const stop: Stop = { id: uid(), lng, lat, arrivedAt: takenAt, photoIds: [photoId], origin: 'manual' };
   let at = j.stops.findIndex((s) => s.arrivedAt != null && s.arrivedAt > takenAt);
   if (at < 0) at = j.stops.length;

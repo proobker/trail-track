@@ -7,6 +7,8 @@ export interface Fix {
   end?: number;
   lat: number;
   lng: number;
+  /** Source-reported horizontal accuracy, when the export contains it. */
+  accuracyM?: number;
   /** Local UTC offset in minutes, where the export says. */
   off?: number;
 }
@@ -15,6 +17,9 @@ export interface Located {
   lat: number;
   lng: number;
   via: 'visit' | 'path';
+  method: 'visit' | 'interpolated' | 'nearest';
+  accuracyM?: number;
+  timeGapMs?: number;
 }
 
 const MIN = 60_000;
@@ -111,13 +116,13 @@ export function parseTimeline(json: unknown): Fix[] {
     const pos = r?.position;
     const ll = parseLatLng(pos?.LatLng ?? pos?.latLng);
     const t = time(pos?.timestamp);
-    if (ll && t != null && !(pos.accuracyMeters > MAX_ACCURACY_M)) out.push({ t, lat: ll[0], lng: ll[1], off: isoOffset(pos.timestamp) });
+    if (ll && t != null && !(pos.accuracyMeters > MAX_ACCURACY_M)) out.push({ t, lat: ll[0], lng: ll[1], accuracyM: Number.isFinite(pos.accuracyMeters) && pos.accuracyMeters >= 0 ? pos.accuracyMeters : undefined, off: isoOffset(pos.timestamp) });
   }
   for (const o of j?.timelineObjects ?? []) fromTimelineObject(o, out);
   for (const l of j?.locations ?? []) {
     const ll = e7(l);
     const t = time(l?.timestamp ?? l?.timestampMs);
-    if (ll && t != null && !(l.accuracy > MAX_ACCURACY_M)) out.push({ t, lat: ll[0], lng: ll[1] });
+    if (ll && t != null && !(l.accuracy > MAX_ACCURACY_M)) out.push({ t, lat: ll[0], lng: ll[1], accuracyM: Number.isFinite(l.accuracy) && l.accuracy >= 0 ? l.accuracy : undefined });
   }
   return out;
 }
@@ -192,16 +197,16 @@ export function makeLocator(fixes: Fix[]): (p: Pick<Photo, 'takenAt' | 'wallCloc
       const v = visits[i];
       if (v.e >= t && (!best || v.e - v.s < best.e - best.s)) best = v;
     }
-    if (best) return { lat: best.f.lat, lng: best.f.lng, via: 'visit' };
+    if (best) return { lat: best.f.lat, lng: best.f.lng, via: 'visit', method: 'visit', accuracyM: best.f.accuracyM };
 
     const i = lastAtOrBefore(points, t, (x) => x.k);
     const a = points[i];
     const b = points[i + 1];
     if (a && b && b.k - a.k <= INTERPOLATE_MS) {
       const f = b.k === a.k ? 0 : (t - a.k) / (b.k - a.k);
-      return { lat: a.f.lat + (b.f.lat - a.f.lat) * f, lng: a.f.lng + (b.f.lng - a.f.lng) * f, via: 'path' };
+      return { lat: a.f.lat + (b.f.lat - a.f.lat) * f, lng: a.f.lng + (b.f.lng - a.f.lng) * f, via: 'path', method: 'interpolated', timeGapMs: Math.min(t - a.k, b.k - t) };
     }
     const near = [a, b].filter((x) => x && Math.abs(x.k - t) <= NEAREST_MS).sort((x, y) => Math.abs(x!.k - t) - Math.abs(y!.k - t))[0];
-    return near ? { lat: near.f.lat, lng: near.f.lng, via: 'path' } : undefined;
+    return near ? { lat: near.f.lat, lng: near.f.lng, via: 'path', method: 'nearest', accuracyM: near.f.accuracyM, timeGapMs: Math.abs(near.k - t) } : undefined;
   };
 }

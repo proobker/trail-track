@@ -47,7 +47,7 @@ Google shut down full-library access to Google Photos in March 2025, which is wh
 
 ## Journal
 
-- **Named trails:** In the Route tab, press "Find nearby trails" for a compact walking journey, or select a walking leg first to search around that leg. Preview OpenStreetMap candidates on the map, then confirm a name. The existing route geometry stays intact. Large walking areas must be searched one leg at a time.
+- **Named trails:** In the Route tab, press "Find nearby trails" for a compact walking journey, or select a walking leg first to search around that leg. Preview OpenStreetMap candidates (plus USGS National Map trails in US areas), then confirm a name. Stops and sampled route points rank the suggestions. The existing route geometry stays intact. Large walking areas must be searched one leg at a time. Search results are cached locally for seven days.
 - Stops are named automatically from the place they're at (reverse geocoding via Photon), e.g. "Monastery of the Hieronymites · Lisbon, Portugal".
 - The route list is grouped by day.
 - Each stop can hold a note, which is also shown during playback.
@@ -114,5 +114,6 @@ Everything is stored in this browser (IndexedDB). Nothing is uploaded to a serve
 - Photon (komoot): place search and place names
 - routing.openstreetmap.de: OSRM routes; only the coordinates of each leg are sent
 - Overpass API (only when you press "Find nearby trails"): a bounded area around walking stops is sent to look up named OpenStreetMap trails. The selected trail name and OpenStreetMap ID are saved locally; your existing route shape is not replaced.
+- USGS National Map (US trail searches only): the same bounded area is queried for additional trail names. Its failure does not block OpenStreetMap results.
 
 The public routing server is rate-limited, so routes are fetched about one per second and cached.
