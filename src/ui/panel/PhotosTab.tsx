@@ -2,6 +2,7 @@ import { Check, ImagePlus, Link2, MapPin, MapPinned, Trash2 } from 'lucide-react
 import { useState } from 'react';
 import { JUNK_KINDS, KIND_LABEL, photoKind } from '../../import/photoKind';
 import { makeLocator, readTimelineFiles } from '../../import/timeline';
+import { findTextHeavy } from '../../import/textHeavy';
 import { thumbUrl } from '../../model/photos';
 import { stopName, type Journey, type Photo } from '../../model/types';
 import { attachLoose, notify, openLightbox, placeLoosePhotos, removePhotos, setTool, undo, useStore } from '../../store';
@@ -31,6 +32,7 @@ export function PhotosTab({ j, photos }: { j: Journey; photos: Map<string, Photo
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
+  const [scanProgress, setScanProgress] = useState('');
   const loose = (j.loosePhotoIds ?? []).map((id) => photos.get(id)).filter((p): p is Photo => !!p);
   const all = j.stops.flatMap((s) => s.photoIds);
   const nearestStop = (p: Photo) =>
@@ -45,6 +47,28 @@ export function PhotosTab({ j, photos }: { j: Journey; photos: Map<string, Photo
       return next;
     });
   const stopSelecting = () => (setSelecting(false), setPicked(new Set()));
+  const selectTextHeavy = async () => {
+    const candidates = everyId.flatMap((id) => {
+      const p = photos.get(id);
+      const blob = p?.previewBlob ?? p?.thumbBlob;
+      return blob ? [{ id, getBlob: async () => blob }] : [];
+    });
+    if (!candidates.length) return notify('These photos have no readable previews to scan');
+    setBusy(true);
+    setScanProgress('Loading text scanner…');
+    try {
+      const found = await findTextHeavy(candidates, (done, total) => setScanProgress(`Checking photos… ${done} / ${total}`));
+      if (!found.size) return notify('No text-heavy photos found');
+      setPicked(found);
+      setSelecting(true);
+      notify(`Selected ${found.size} text-heavy photo${found.size === 1 ? '' : 's'}. Review them before removing.`);
+    } catch (e) {
+      notify((e as Error).message);
+    } finally {
+      setBusy(false);
+      setScanProgress('');
+    }
+  };
   const placeWithTimeline = async () => {
     const files = await pickFiles('.json');
     if (!files.length) return;
@@ -84,9 +108,14 @@ export function PhotosTab({ j, photos }: { j: Journey; photos: Map<string, Photo
                 </div>
               </>
             ) : (
-              <button className="btn-ghost ml-auto px-2 py-1 text-xs" onClick={() => setSelecting(true)}>
-                <Check size={13} /> Select photos to remove
-              </button>
+              <div className="ml-auto flex flex-wrap justify-end gap-1.5">
+                <button className="btn-ghost border border-white/10 px-2 py-1 text-xs" disabled={busy} onClick={selectTextHeavy}>
+                  {scanProgress || 'Select text-heavy photos'}
+                </button>
+                <button className="btn-ghost px-2 py-1 text-xs" disabled={busy} onClick={() => setSelecting(true)}>
+                  <Check size={13} /> Select photos to remove
+                </button>
+              </div>
             )}
           </div>
           {selecting && byKind.length > 0 && (

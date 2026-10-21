@@ -6,6 +6,7 @@ import { analyzePhotoScenes, type SceneEmbeddings } from '../import/sceneAnalysi
 import { scanUploads } from '../import/exifUpload';
 import { pickFromGooglePhotos } from '../import/googlePicker';
 import { scanTakeout } from '../import/takeout';
+import { findTextHeavy } from '../import/textHeavy';
 import { parseTrackText, trackToJourney } from '../import/tracks';
 import { savePhotos } from '../model/photos';
 import { JUNK_KINDS, KIND_LABEL, photoKind, type PhotoKind } from '../import/photoKind';
@@ -56,6 +57,7 @@ export function Wizard() {
   const [analyzeScenes, setAnalyzeScenes] = useState(false);
   const [target, setTarget] = useState<'new' | 'current'>('new');
   const [skipKinds, setSkipKinds] = useState<Set<PhotoKind>>(() => new Set(DEFAULT_SKIP));
+  const [textScan, setTextScan] = useState<{ key: string; flagged: Set<string>; kept: Set<string> }>();
   /** 0 keeps everything in one journey. */
   const [gapDays, setGapDays] = useState(TRIP_GAP_DAYS);
   /** Groups whose default the user flipped (trips unticked, at-home stretches ticked), keyed by their first photo's id. */
@@ -73,6 +75,7 @@ export function Wizard() {
     setPerson({ mode: 'any' });
     setTarget('new');
     setSkipKinds(new Set(DEFAULT_SKIP));
+    setTextScan(undefined);
     setAnalyzeScenes(false);
     setGapDays(TRIP_GAP_DAYS);
     setFlipped(new Set());
@@ -94,9 +97,15 @@ export function Wizard() {
     for (const c of inRange) n.set(c.kind, (n.get(c.kind) ?? 0) + 1);
     return n;
   }, [inRange]);
-  const matching = useMemo(
+  const eligible = useMemo(
     () => inRange.filter((c) => !skipKinds.has(c.kind) && (includeLoose || hasLocation(c.photo))),
     [inRange, skipKinds, includeLoose],
+  );
+  const textScanKey = eligible.map((c) => c.photo.id).join('|');
+  const currentTextScan = textScan?.key === textScanKey ? textScan : undefined;
+  const matching = useMemo(
+    () => eligible.filter((c) => !currentTextScan?.flagged.has(c.photo.id) || currentTextScan.kept.has(c.photo.id)),
+    [eligible, currentTextScan],
   );
   const detectedHome = useMemo(() => findHome(matching.map((c) => ({ t: c.photo.takenAt, lat: c.photo.lat, lng: c.photo.lng }))), [matching]);
   const home = useHome ? detectedHome : undefined;
@@ -139,6 +148,7 @@ export function Wizard() {
     if (!list.length) throw new Error('No photos found there');
     const times = list.map((c) => c.photo.takenAt).sort((a, b) => a - b);
     setCands(list);
+    setTextScan(undefined);
     setDateFrom(toDay(times[0]));
     setDateTo(toDay(times[times.length - 1]));
     if (current) setTarget(list.every((c) => !hasLocation(c.photo)) ? 'current' : 'new');
@@ -259,6 +269,15 @@ export function Wizard() {
       else if (visualMatchCount) setTimeout(() => notify(`Matched ${visualMatchCount} photo${visualMatchCount === 1 ? '' : 's'} without GPS to a stop using local image comparison`), 3800);
       close();
     });
+
+  const scanForText = () => withBusy('Loading on-device text scanner…', async () => {
+    const flagged = await findTextHeavy(
+      eligible.map((c) => ({ id: c.photo.id, getBlob: async () => c.getBlob?.() })),
+      (done, total) => setBusy(`Checking photos for text… ${done} / ${total}`),
+    );
+    setTextScan({ key: textScanKey, flagged, kept: new Set() });
+    notify(flagged.size ? `Found ${flagged.size} text-heavy photo${flagged.size === 1 ? '' : 's'} to review` : 'No text-heavy photos found');
+  });
 
   const toggle = <T,>(s: Set<T>, v: T) => {
     const next = new Set(s);
@@ -424,6 +443,29 @@ export function Wizard() {
                 <p className="mt-2 text-xs text-slate-500">Recognised from file names and the phone folder they came from. Anything missed can be removed later from the Photos tab.</p>
               </section>
             )}
+            <section className="rounded-xl bg-white/5 p-4 text-sm">
+              <h3 className="mb-1 font-medium text-slate-200">Photos with lots of text</h3>
+              <p className="mb-3 text-xs leading-relaxed text-slate-400">Scan the picture itself for text and leave out text-heavy images. A sign or a few words in a journey photo should stay. The scanner runs on this device; first use downloads its English text data.</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="btn-ghost border border-white/10" disabled={!!busy || !eligible.length} onClick={scanForText}>
+                  {currentTextScan ? 'Scan again' : 'Find text-heavy photos'}
+                </button>
+                {currentTextScan && <span className="text-xs text-slate-400">{currentTextScan.flagged.size - currentTextScan.kept.size} left out</span>}
+                {currentTextScan && <button className="text-xs text-emerald-300 underline" onClick={() => setTextScan(undefined)}>Clear text filter</button>}
+              </div>
+              {currentTextScan && currentTextScan.flagged.size > 0 && (
+                <ul className="mt-3 max-h-40 space-y-1 overflow-y-auto">
+                  {eligible.filter((c) => currentTextScan.flagged.has(c.photo.id)).map((c) => (
+                    <li key={c.photo.id}>
+                      <label className="flex items-center gap-2 rounded-lg bg-white/[0.03] px-2 py-1.5 text-xs text-slate-300">
+                        <input type="checkbox" checked={currentTextScan.kept.has(c.photo.id)} onChange={() => setTextScan((scan) => scan && ({ ...scan, kept: toggle(scan.kept, c.photo.id) }))} />
+                        <span className="min-w-0 flex-1 truncate">Keep {c.photo.fileName}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
             {current && (
               <section>
                 <h3 className="mb-2 text-sm font-medium text-slate-300">Add to</h3>

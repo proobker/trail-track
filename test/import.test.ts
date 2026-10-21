@@ -3,9 +3,26 @@ import { toGPX, toKML } from '../src/export/exporters';
 import { parseTrackText, trackToJourney } from '../src/import/tracks';
 import { matchImageName, parseSidecar } from '../src/import/takeoutSidecar';
 import { dateFromFileName } from '../src/import/fileNameDate';
+import { isTextHeavy, type TextLine } from '../src/import/textHeavy';
 import { makeLocator, parseTimeline, prepareFixes } from '../src/import/timeline';
 import { buildTimeline, sample } from '../src/animate/timeline';
 import { arc } from '../src/routing/route';
+
+describe('text-heavy photo filter', () => {
+  const line = (text: string, y: number, width = 700, height = 28, confidence = 90): TextLine => ({
+    text, confidence, bbox: { x0: 100, y0: y, x1: 100 + width, y1: y + height },
+  });
+  it('flags document pages and large quote cards', () => {
+    const document = Array.from({ length: 8 }, (_, i) => line('This is a paragraph from a scanned document', 80 + i * 55));
+    expect(isTextHeavy(document, 1000, 800)).toBe(true);
+    expect(isTextHeavy([line('Follow your own path', 200, 800, 110), line('The journey begins today', 350, 800, 110)], 1000, 800)).toBe(true);
+  });
+  it('keeps journey photos with a sign, incidental lettering, or uncertain OCR', () => {
+    expect(isTextHeavy([line('National Park', 200, 300, 25)], 1000, 800)).toBe(false);
+    expect(isTextHeavy([line('Trailhead', 200, 250, 25), line('Welcome hikers', 250, 300, 25)], 1000, 800)).toBe(false);
+    expect(isTextHeavy(Array.from({ length: 8 }, (_, i) => line('Possible text on a tree', 80 + i * 55, 700, 28, 30)), 1000, 800)).toBe(false);
+  });
+});
 
 describe('parseSidecar', () => {
   it('reads time, exif location and people', () => {
