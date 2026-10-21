@@ -18,7 +18,7 @@ npm run build      # production build in dist/ (also builds the share-page viewe
 | Source | Location | People filter | Notes |
 | --- | --- | --- | --- |
 | **Google Takeout** (zip or extracted folder) | ✅ from each photo's JSON sidecar | ✅ named faces | Best option. Export only "Google Photos" at [takeout.google.com](https://takeout.google.com). Split zips can be added together. Files are read locally and only matching photos are thumbnailed. |
-| **Upload photos** | ✅ from EXIF GPS | — | Photos sent over chat apps usually have their location stripped. |
+| **Upload photos** | ✅ from EXIF GPS | — | Photos sent over chat apps usually have their location stripped. Without an EXIF date, the date in the file name is used (e.g. `IMG-20240512-WA0003.jpg`). |
 | **Google Photos picker** | ❌ | — | Google's Picker API removes GPS and offers no people filter. Picked photos are placed along an existing trail by timestamp, or you can pin them. |
 | **KML / GPX / GeoJSON** | ✅ | — | Each track becomes a segment and keeps its exact shape. |
 | **Manual** | — | — | Click the map in "Add stops" mode, or search for a place and press "+ stop". |

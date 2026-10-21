@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { toGPX, toKML } from '../src/export/exporters';
 import { parseTrackText, trackToJourney } from '../src/import/tracks';
 import { matchImageName, parseSidecar } from '../src/import/takeoutSidecar';
+import { dateFromFileName } from '../src/import/fileNameDate';
 import { buildTimeline, sample } from '../src/animate/timeline';
 import { arc } from '../src/routing/route';
 
@@ -22,6 +23,29 @@ describe('parseSidecar', () => {
   });
   it('ignores album metadata', () => {
     expect(parseSidecar({ title: 'Trip album', description: '' })).toBeUndefined();
+  });
+});
+
+describe('dateFromFileName', () => {
+  const local = (...a: [number, number, number, number, number, number]) => new Date(a[0], a[1] - 1, a[2], a[3], a[4], a[5]).getTime();
+  it('reads phone and camera names with a time', () => {
+    expect(dateFromFileName('PXL_20240512_093015123.jpg')).toBe(local(2024, 5, 12, 9, 30, 15));
+    expect(dateFromFileName('IMG_20240512_093015.jpg')).toBe(local(2024, 5, 12, 9, 30, 15));
+    expect(dateFromFileName('20240512_093015.heic')).toBe(local(2024, 5, 12, 9, 30, 15));
+    expect(dateFromFileName('Screenshot_2024-05-12-09-30-15-123_com.app.png')).toBe(local(2024, 5, 12, 9, 30, 15));
+    expect(dateFromFileName('Photo 2024-05-12 09.30.15.jpg')).toBe(local(2024, 5, 12, 9, 30, 15));
+  });
+  it('places date-only names (WhatsApp) at noon', () => {
+    expect(dateFromFileName('IMG-20240512-WA0003.jpg')).toBe(local(2024, 5, 12, 12, 0, 0));
+  });
+  it('reads epoch milliseconds', () => {
+    expect(dateFromFileName('FB_IMG_1715506215000.jpg')).toBe(1715506215000);
+  });
+  it('rejects names without a plausible date', () => {
+    expect(dateFromFileName('IMG_1234.jpg')).toBeUndefined();
+    expect(dateFromFileName('DSC_20240231_120000.jpg')).toBeUndefined();
+    expect(dateFromFileName('scan_12345678.jpg')).toBeUndefined();
+    expect(dateFromFileName('holiday.jpg')).toBeUndefined();
   });
 });
 
