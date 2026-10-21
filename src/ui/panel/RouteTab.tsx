@@ -6,7 +6,7 @@ import { thumbUrl } from '../../model/photos';
 import { stopName, type Journey, type Photo, type Stop } from '../../model/types';
 import { deleteStop, mergeStop, openLightbox, reorderStop, setTool, splitActiveJourney, splitStop, updateStop, useStore } from '../../store';
 import { groupByDay } from '../../trail/days';
-import { DAY_MS, TRIP_GAP_DAYS, tripStarts } from '../../trail/trips';
+import { DAY_MS, journeyTrips } from '../../trail/trips';
 import { ModeIcon } from '../icons';
 import { formatKm, ModeChip } from '../ModeChip';
 import { MenuItem, Popover } from '../Popover';
@@ -162,8 +162,10 @@ export function RouteTab({ j, photos }: { j: Journey; photos: Map<string, Photo>
   const selectedSegmentId = useStore((s) => s.selectedSegmentId);
   const segFrom = new Map(j.segments.map((s) => [s.fromStopId, s]));
   const days = groupByDay(j);
-  const gaps = tripStarts(j, TRIP_GAP_DAYS * DAY_MS);
-  const gapAt = new Map(gaps.map((g) => [g.index, g.gapMs]));
+  const trips = journeyTrips(j);
+  const cutAt = new Map(trips.cuts.map((c) => [c.index, c]));
+  const tripCount = trips.homeParts.filter((h) => !h).length;
+  const homeCount = trips.homeParts.length - tripCount;
 
   if (!j.stops.length) {
     return (
@@ -179,30 +181,39 @@ export function RouteTab({ j, photos }: { j: Journey; photos: Map<string, Photo>
     );
   }
 
-  const gapDays = (ms: number) => Math.floor(ms / DAY_MS);
+  const cutLabel = (c: (typeof trips.cuts)[number]) =>
+    c.reason === 'left' ? 'Left home' : c.reason === 'back' ? 'Back home' : `${Math.floor(c.gapMs / DAY_MS)} days without photos`;
+  const divider = (index: number) => {
+    const c = cutAt.get(index);
+    return (
+      c && (
+        <div className="flex items-center gap-2 px-4 py-2 text-xs text-amber-200/80">
+          <span className="h-px flex-1 bg-amber-300/20" />
+          {cutLabel(c)}
+          <button className="btn-ghost px-2 py-0.5 text-xs" onClick={() => splitActiveJourney([index])} title="Move this and everything after it into a new journey">
+            <Scissors size={13} /> Split here
+          </button>
+          <span className="h-px flex-1 bg-amber-300/20" />
+        </div>
+      )
+    );
+  };
 
   return (
     <div className="pb-24">
-      {gaps.length > 0 && (
+      {trips.cuts.length > 0 && (
         <div className="m-3 rounded-xl border border-amber-300/20 bg-amber-300/[0.06] p-3 text-xs leading-relaxed text-amber-100/90">
-          This journey has {gaps.length === 1 ? 'a gap' : `${gaps.length} gaps`} of {TRIP_GAP_DAYS}+ days without photos, so it probably covers {gaps.length + 1} separate trips.
-          <button className="btn-ghost mt-2 w-full border border-amber-300/30 py-1.5 text-xs" onClick={() => splitActiveJourney(gaps.map((g) => g.index))}>
-            <Scissors size={14} /> Split into {gaps.length + 1} journeys
+          {homeCount > 0
+            ? `This journey mixes ${tripCount === 1 ? 'a trip' : `${tripCount} trips`} with everyday photos from home. Splitting makes each trip its own journey; the at-home stretches become "At home" journeys you can delete.`
+            : `This journey has ${trips.cuts.length === 1 ? 'a gap' : `${trips.cuts.length} gaps`} of several days without photos, so it probably covers ${trips.cuts.length + 1} separate trips.`}
+          <button className="btn-ghost mt-2 w-full border border-amber-300/30 py-1.5 text-xs" onClick={() => splitActiveJourney(trips.cuts.map((c) => c.index), trips.homeParts)}>
+            <Scissors size={14} /> Split into {trips.cuts.length + 1} journeys
           </button>
         </div>
       )}
       {days.map((d, di) => (
         <section key={d.date ?? `undated-${di}`}>
-          {gapAt.has(d.stops[0].index) && (
-            <div className="flex items-center gap-2 px-4 py-2 text-xs text-amber-200/80">
-              <span className="h-px flex-1 bg-amber-300/20" />
-              {gapDays(gapAt.get(d.stops[0].index)!)} days without photos
-              <button className="btn-ghost px-2 py-0.5 text-xs" onClick={() => splitActiveJourney([d.stops[0].index])} title="Move this and everything after it into a new journey">
-                <Scissors size={13} /> Split here
-              </button>
-              <span className="h-px flex-1 bg-amber-300/20" />
-            </div>
-          )}
+          {divider(d.stops[0].index)}
           {(days.length > 1 || d.date) && (
             <header className="glass-strong sticky top-0 z-10 flex items-baseline justify-between gap-2 border-b border-white/5 px-4 py-2">
               <div className="text-xs font-semibold tracking-wide text-slate-200 uppercase">
@@ -226,6 +237,7 @@ export function RouteTab({ j, photos }: { j: Journey; photos: Map<string, Photo>
               const seg = segFrom.get(stop.id);
               return (
                 <div key={stop.id}>
+                  {index !== d.stops[0].index && divider(index)}
                   <StopRow stop={stop} index={index} count={j.stops.length} photos={photos} selected={stop.id === selectedStopId} />
                   {seg && index < j.stops.length - 1 && <ModeChip seg={seg} journeyId={j.id} selected={seg.id === selectedSegmentId} />}
                 </div>

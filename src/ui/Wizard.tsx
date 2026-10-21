@@ -1,5 +1,5 @@
 import { ArrowLeft, Cloud, FolderOpen, Images, Loader2, MapPinned, PencilLine, Route, Archive, X, type LucideIcon } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { googleConfigured, signIn, useAuth } from '../auth/google';
 import { materialize, type PhotoCandidate } from '../import/candidate';
 import { scanUploads } from '../import/exifUpload';
@@ -16,7 +16,8 @@ import { localDay } from '../trail/days';
 import { filterPhotos, hasLocation, peopleIndex } from '../trail/filter';
 import { newJourney, reconcileSegments } from '../trail/journey';
 import { findOutliers } from '../trail/outliers';
-import { DAY_MS, rangeTitle, splitIntoTrips, TRIP_GAP_DAYS } from '../trail/trips';
+import { DAY_MS, findHome, groupTrips, rangeTitle, TRIP_GAP_DAYS } from '../trail/trips';
+import { reverseGeocode } from '../geo/reverse';
 import { pickFiles } from './pickFiles';
 import { TimelineHelp } from './TimelineHelp';
 
@@ -54,8 +55,10 @@ export function Wizard() {
   const [skipKinds, setSkipKinds] = useState<Set<PhotoKind>>(() => new Set(DEFAULT_SKIP));
   /** 0 keeps everything in one journey. */
   const [gapDays, setGapDays] = useState(TRIP_GAP_DAYS);
-  /** Trips the user unticked, keyed by their first photo's id. */
-  const [skipTrips, setSkipTrips] = useState<Set<string>>(() => new Set());
+  /** Groups whose default the user flipped (trips unticked, at-home stretches ticked), keyed by their first photo's id. */
+  const [flipped, setFlipped] = useState<Set<string>>(() => new Set());
+  const [useHome, setUseHome] = useState(true);
+  const [homeName, setHomeName] = useState<string>();
 
   const reset = () => {
     setSource(undefined);
@@ -68,7 +71,8 @@ export function Wizard() {
     setTarget('new');
     setSkipKinds(new Set(DEFAULT_SKIP));
     setGapDays(TRIP_GAP_DAYS);
-    setSkipTrips(new Set());
+    setFlipped(new Set());
+    setUseHome(true);
   };
   const close = () => {
     reset();
@@ -90,11 +94,27 @@ export function Wizard() {
     () => inRange.filter((c) => !skipKinds.has(c.kind) && (includeLoose || hasLocation(c.photo))),
     [inRange, skipKinds, includeLoose],
   );
+  const detectedHome = useMemo(() => findHome(matching.map((c) => ({ t: c.photo.takenAt, lat: c.photo.lat, lng: c.photo.lng }))), [matching]);
+  const home = useHome ? detectedHome : undefined;
+  useEffect(() => {
+    setHomeName(undefined);
+    if (!detectedHome) return;
+    let live = true;
+    void reverseGeocode(detectedHome.lng, detectedHome.lat).then((p) => live && setHomeName(p?.city ?? p?.name));
+    return () => {
+      live = false;
+    };
+  }, [detectedHome?.lat, detectedHome?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
   const trips = useMemo(
-    () => (target === 'new' && gapDays > 0 ? splitIntoTrips(matching, (c) => c.photo.takenAt, gapDays * DAY_MS) : [matching]),
-    [matching, target, gapDays],
+    () =>
+      target === 'new' && gapDays > 0
+        ? groupTrips(matching, (c) => ({ t: c.photo.takenAt, lat: c.photo.lat, lng: c.photo.lng }), gapDays * DAY_MS, home)
+        : [{ items: matching, home: false }],
+    [matching, target, gapDays, home],
   );
-  const chosen = trips.filter((t) => t.length && !skipTrips.has(t[0].photo.id));
+  const included = (g: { items: typeof matching; home: boolean }) => g.items.length > 0 && g.home === flipped.has(g.items[0].photo.id);
+  const chosen = trips.filter(included).map((g) => g.items);
+  const tripCount = trips.filter((g) => !g.home).length;
   const chosenCount = chosen.reduce((n, t) => n + t.length, 0);
   const located = chosen.reduce((n, t) => n + t.filter((c) => hasLocation(c.photo)).length, 0);
 
@@ -418,10 +438,10 @@ export function Wizard() {
             {target === 'new' && (
               <section>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-sm font-medium text-slate-300">{trips.length > 1 ? `${trips.length} trips` : 'Trips'}</h3>
+                  <h3 className="text-sm font-medium text-slate-300">{tripCount > 1 ? `${tripCount} trips` : 'Trips'}</h3>
                   <label className="flex items-center gap-2 text-xs text-slate-400">
                     New journey after
-                    <select className="input w-auto py-1 text-xs" value={gapDays} onChange={(e) => (setGapDays(Number(e.target.value)), setSkipTrips(new Set()))}>
+                    <select className="input w-auto py-1 text-xs" value={gapDays} onChange={(e) => (setGapDays(Number(e.target.value)), setFlipped(new Set()))}>
                       {[1, 2, 3, 7, 14].map((d) => (
                         <option key={d} value={d}>
                           {d}+ day{d === 1 ? '' : 's'} without photos
@@ -431,18 +451,29 @@ export function Wizard() {
                     </select>
                   </label>
                 </div>
+                {detectedHome && gapDays > 0 && (
+                  <label className="mb-2 flex items-start gap-2 text-xs leading-relaxed text-slate-400">
+                    <input type="checkbox" className="mt-0.5" checked={useHome} onChange={(e) => (setUseHome(e.target.checked), setFlipped(new Set()))} />
+                    <span>
+                      Home looks like <b className="text-slate-200">{homeName ?? 'your most photographed area'}</b> ({detectedHome.days} days of photos). Trips are the times you were away; everyday photos at home are left out unless you tick them.
+                    </span>
+                  </label>
+                )}
                 {trips.length > 1 ? (
-                  <ul className="max-h-48 space-y-1 overflow-y-auto rounded-xl bg-white/[0.03] p-1.5">
-                    {trips.map((t) => {
-                      const id = t[0].photo.id;
-                      const from = localDay(t[0].photo.takenAt);
-                      const to = localDay(t[t.length - 1].photo.takenAt);
+                  <ul className="max-h-56 space-y-1 overflow-y-auto rounded-xl bg-white/[0.03] p-1.5">
+                    {trips.map((g) => {
+                      const id = g.items[0].photo.id;
+                      const from = localDay(g.items[0].photo.takenAt);
+                      const to = localDay(g.items[g.items.length - 1].photo.takenAt);
                       return (
                         <li key={id}>
-                          <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-200 hover:bg-white/5">
-                            <input type="checkbox" checked={!skipTrips.has(id)} onChange={() => setSkipTrips((s) => toggle(s, id))} />
-                            <span className="flex-1">{rangeTitle(from, to)}</span>
-                            <span className="text-xs text-slate-500 tabular-nums">{t.length} photos</span>
+                          <label className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-white/5 ${g.home ? 'text-slate-500' : 'text-slate-200'}`}>
+                            <input type="checkbox" checked={included(g)} onChange={() => setFlipped((s) => toggle(s, id))} />
+                            <span className="flex-1">
+                              {g.home && 'At home · '}
+                              {rangeTitle(from, to)}
+                            </span>
+                            <span className="text-xs text-slate-500 tabular-nums">{g.items.length} photos</span>
                           </label>
                         </li>
                       );

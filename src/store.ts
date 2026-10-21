@@ -371,12 +371,12 @@ export async function placeLoosePhotos(placed: Photo[]) {
 }
 
 /** Cuts the active journey into separate journeys before each of the given stop indexes. */
-export async function splitActiveJourney(cuts: number[]) {
+export async function splitActiveJourney(cuts: number[], homeParts: boolean[] = []) {
   const j = activeJourney();
   if (!j || !cuts.length) return;
   const loose = (await db.photos.bulkGet(j.loosePhotoIds ?? [])).filter((p) => !!p);
   const takenAt = new Map(loose.map((p) => [p.id, p.takenAt]));
-  const [first, ...rest] = splitJourney(j, cuts, (id) => takenAt.get(id));
+  const [first, ...rest] = splitJourney(j, cuts, (id) => takenAt.get(id), homeParts);
   save(first);
   await db.journeys.bulkPut(rest);
   set((s) => ({ journeys: [...[...rest].reverse(), ...s.journeys], selectedStopId: undefined, selectedSegmentId: undefined }));

@@ -4,7 +4,7 @@ import { clusterPhotos } from '../src/trail/cluster';
 import { filterPhotos, peopleIndex } from '../src/trail/filter';
 import { inferMode } from '../src/trail/inferMode';
 import { newJourney, reconcileSegments } from '../src/trail/journey';
-import { DAY_MS, rangeTitle, splitIntoTrips, splitJourney, tripStarts } from '../src/trail/trips';
+import { DAY_MS, findHome, groupTrips, journeyTrips, rangeTitle, splitJourney, type TripPoint } from '../src/trail/trips';
 import { photoKind } from '../src/import/photoKind';
 import { placeUnlocated } from '../src/trail/placeUnlocated';
 
@@ -96,12 +96,66 @@ describe('reconcileSegments', () => {
   });
 });
 
-describe('splitIntoTrips', () => {
-  it('starts a new trip at gaps of at least the threshold', () => {
-    const t = [0, 1, 2, 10, 11, 30].map((d) => d * DAY_MS);
-    expect(splitIntoTrips(t, (x) => x, 3 * DAY_MS).map((g) => g.length)).toEqual([3, 2, 1]);
-    expect(splitIntoTrips([...t].reverse(), (x) => x, 3 * DAY_MS)[0]).toEqual([0, DAY_MS, 2 * DAY_MS]);
-    expect(splitIntoTrips(t, (x) => x, 100 * DAY_MS)).toHaveLength(1);
+describe('trips', () => {
+  const KTM = { lat: 27.7172, lng: 85.324 };
+  const POKHARA = { lat: 28.2096, lng: 83.9856 };
+  const PARIS = { lat: 48.8566, lng: 2.3522 };
+  const start = Date.UTC(2024, 0, 1, 4);
+  /** Three months of near-daily photos at home in Kathmandu, with a Pokhara trip and a Europe trip. */
+  const library: TripPoint[] = [];
+  for (let d = 0; d < 90; d++) {
+    const where = d >= 20 && d < 24 ? POKHARA : d >= 50 && d < 60 ? PARIS : KTM;
+    library.push({ t: start + d * DAY_MS, ...where }, { t: start + d * DAY_MS + 3 * 3_600_000, ...where });
+  }
+  library.push({ t: start + 52 * DAY_MS + 3_600_000 });
+
+  it('cannot see trips by time gaps alone when there are photos every day', () => {
+    expect(groupTrips(library, (p) => p, 3 * DAY_MS)).toHaveLength(1);
+  });
+
+  it('finds home as the most photographed area', () => {
+    const home = findHome(library)!;
+    expect(home.lat).toBeCloseTo(KTM.lat, 1);
+    expect(home.days).toBe(76);
+  });
+
+  it('treats the times away from home as trips', () => {
+    const groups = groupTrips(library, (p) => p, 3 * DAY_MS, findHome(library));
+    expect(groups.map((g) => [g.home, g.items.length, g.reason])).toEqual([
+      [true, 40, undefined],
+      [false, 8, 'left'],
+      [true, 52, 'back'],
+      [false, 21, 'left'],
+      [true, 60, 'back'],
+    ]);
+  });
+
+  it('has no home for a single trip, however spread out', () => {
+    const trip = [0, 1, 2, 5, 6].map((d) => ({ t: start + d * DAY_MS, ...(d < 3 ? PARIS : KTM) }));
+    expect(findHome(trip)).toBeUndefined();
+    expect(groupTrips(trip, (p) => p, 3 * DAY_MS).map((g) => g.items.length)).toEqual([3, 2]);
+  });
+
+  it('offers cuts for an existing journey that mixes home and trips', () => {
+    const stops: Stop[] = library
+      .filter((p) => p.lat != null)
+      .map((p, i) => ({ id: `s${i}`, lat: p.lat!, lng: p.lng!, arrivedAt: p.t, photoIds: [], origin: 'photo' }));
+    const { cuts, homeParts } = journeyTrips(newJourney('Everything', { stops }));
+    expect(cuts.map((c) => c.reason)).toEqual(['left', 'back', 'left', 'back']);
+    expect(homeParts).toEqual([true, false, true, false, true]);
+    const parts = splitJourney(newJourney('Everything', { stops }), cuts.map((c) => c.index), () => undefined, homeParts);
+    expect(parts.map((x) => x.title.startsWith('At home'))).toEqual(homeParts);
+    expect(parts[1].stops).toHaveLength(8);
+  });
+
+  it('joins two trips separated by a short layover at home', () => {
+    const home = { ...KTM, days: 30 };
+    const pts = [
+      { t: 0, ...POKHARA },
+      { t: 3_600_000, ...KTM },
+      { t: 4 * 3_600_000, ...PARIS },
+    ];
+    expect(groupTrips(pts, (p) => p, 3 * DAY_MS, home).map((g) => [g.home, g.items.length])).toEqual([[false, 3]]);
   });
 });
 
@@ -116,7 +170,7 @@ describe('splitJourney', () => {
   j.segments = reconcileSegments(j.stops, []).segments;
 
   it('finds trip starts and cuts there, dropping the leg across the cut', () => {
-    expect(tripStarts(j, 3 * DAY_MS)).toEqual([{ index: 2, gapMs: 9 * DAY_MS }]);
+    expect(journeyTrips(j).cuts).toEqual([{ index: 2, reason: 'gap', gapMs: 9 * DAY_MS }]);
     const times: Record<string, number> = { early: DAY_MS / 2, late: 10.5 * DAY_MS };
     const [first, second] = splitJourney(j, [2], (id) => times[id]);
     expect(first.id).toBe(j.id);
