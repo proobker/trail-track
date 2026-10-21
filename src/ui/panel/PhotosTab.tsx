@@ -1,9 +1,12 @@
-import { Check, ImagePlus, Link2, MapPin, Trash2 } from 'lucide-react';
+import { Check, ImagePlus, Link2, MapPin, MapPinned, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { JUNK_KINDS, KIND_LABEL, photoKind } from '../../import/photoKind';
+import { makeLocator, readTimelineFiles } from '../../import/timeline';
 import { thumbUrl } from '../../model/photos';
 import { stopName, type Journey, type Photo } from '../../model/types';
-import { attachLoose, openLightbox, removePhotos, setTool, useStore } from '../../store';
+import { attachLoose, notify, openLightbox, placeLoosePhotos, removePhotos, setTool, undo, useStore } from '../../store';
+import { pickFiles } from '../pickFiles';
+import { TimelineHelp } from '../TimelineHelp';
 
 function Thumb({ photo, onClick, selected }: { photo?: Photo; onClick?: () => void; selected?: boolean }) {
   const url = thumbUrl(photo);
@@ -27,6 +30,7 @@ function Thumb({ photo, onClick, selected }: { photo?: Photo; onClick?: () => vo
 export function PhotosTab({ j, photos }: { j: Journey; photos: Map<string, Photo> }) {
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const [busy, setBusy] = useState(false);
   const loose = (j.loosePhotoIds ?? []).map((id) => photos.get(id)).filter((p): p is Photo => !!p);
   const all = j.stops.flatMap((s) => s.photoIds);
   const nearestStop = (p: Photo) =>
@@ -41,6 +45,25 @@ export function PhotosTab({ j, photos }: { j: Journey; photos: Map<string, Photo
       return next;
     });
   const stopSelecting = () => (setSelecting(false), setPicked(new Set()));
+  const placeWithTimeline = async () => {
+    const files = await pickFiles('.json');
+    if (!files.length) return;
+    setBusy(true);
+    try {
+      const locate = makeLocator(await readTimelineFiles(files));
+      const placed = loose.flatMap((p) => {
+        const at = locate(p);
+        return at ? [{ ...p, lat: at.lat, lng: at.lng, locatedBy: 'timeline' as const }] : [];
+      });
+      if (!placed.length) return notify('None of these photos fall within your Timeline data');
+      await placeLoosePhotos(placed);
+      notify(`Placed ${placed.length} of ${loose.length} photos from your Timeline`, { label: 'Undo', run: undo });
+    } catch (e) {
+      notify((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
   const open = (ids: string[], id: string) => (selecting ? pick(id) : openLightbox(ids, ids.indexOf(id)));
 
   return (
@@ -81,6 +104,14 @@ export function PhotosTab({ j, photos }: { j: Journey; photos: Map<string, Photo
         <section>
           <h3 className="section-title">Needs a place · {loose.length}</h3>
           <p className="mb-3 text-xs leading-relaxed text-slate-500">These have no location, so they sit along the trail by the time they were taken (dashed on the map). Pin one exactly, or attach it to the closest stop in time.</p>
+          {!selecting && (
+            <div className="mb-3 rounded-xl bg-white/[0.03] p-3">
+              <button className="btn-ghost w-full border border-white/10 py-1.5 text-xs" disabled={busy} onClick={placeWithTimeline}>
+                <MapPinned size={14} /> {busy ? 'Reading your Timeline…' : 'Find places with Google Timeline'}
+              </button>
+              <TimelineHelp />
+            </div>
+          )}
           <ul className="space-y-1.5">
             {loose.map((p) => {
               const near = j.stops.length ? nearestStop(p) : undefined;

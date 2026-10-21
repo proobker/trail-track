@@ -11,6 +11,13 @@ export interface Photo {
   lng?: number;
   people: string[];
   fileName: string;
+  /**
+   * True when `takenAt` is a camera clock time with no known time zone (EXIF without an offset, or a
+   * file-name date). It was read as if taken in this browser's zone.
+   */
+  wallClock?: boolean;
+  /** Set when the location was filled in from Google Timeline rather than the photo itself. */
+  locatedBy?: 'timeline';
   /** Phone folder the photo was uploaded from (Takeout only), e.g. "Screenshots" or "WhatsApp Images". */
   folder?: string;
   /** ~256px, for map markers and lists. */

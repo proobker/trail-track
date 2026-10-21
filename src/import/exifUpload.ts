@@ -5,6 +5,12 @@ import { dateFromFileName } from './fileNameDate';
 
 const IMAGE_RE = /\.(jpe?g|png|webp|heic|heif|tiff?|avif)$/i;
 
+/** "+05:45" → 345. */
+const offsetMinutes = (v: unknown) => {
+  const m = typeof v === 'string' ? v.match(/^([+-])(\d{2}):?(\d{2})$/) : null;
+  return m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : undefined;
+};
+
 export async function scanUploads(files: File[]): Promise<PhotoCandidate[]> {
   const images = files.filter((f) => f.type.startsWith('image/') || IMAGE_RE.test(f.name));
   return Promise.all(
@@ -12,20 +18,28 @@ export async function scanUploads(files: File[]): Promise<PhotoCandidate[]> {
       let lat: number | undefined;
       let lng: number | undefined;
       // Without EXIF, the file time is usually when the photo was downloaded, so prefer a date in the name.
-      let takenAt = dateFromFileName(file.name) ?? file.lastModified;
+      const fromName = dateFromFileName(file.name);
+      let takenAt = fromName ?? file.lastModified;
+      let wallClock = fromName != null;
       try {
-        const tags = await exifr.parse(file, { gps: true, pick: ['DateTimeOriginal', 'CreateDate', 'latitude', 'longitude'] });
+        const tags = await exifr.parse(file, { gps: true, pick: ['DateTimeOriginal', 'CreateDate', 'OffsetTimeOriginal', 'OffsetTime', 'latitude', 'longitude'] });
         if (tags && Number.isFinite(tags.latitude) && Number.isFinite(tags.longitude)) {
           lat = tags.latitude;
           lng = tags.longitude;
         }
         const date: Date | undefined = tags?.DateTimeOriginal ?? tags?.CreateDate;
-        if (date instanceof Date && !Number.isNaN(date.getTime())) takenAt = date.getTime();
+        if (date instanceof Date && !Number.isNaN(date.getTime())) {
+          // exifr reads the camera's clock time as if it were in this browser's zone; the offset tag gives the real one.
+          const off = offsetMinutes(tags.OffsetTimeOriginal ?? tags.OffsetTime);
+          const wall = date.getTime() - date.getTimezoneOffset() * 60_000;
+          takenAt = off != null ? wall - off * 60_000 : date.getTime();
+          wallClock = off == null;
+        }
       } catch {
         // No readable EXIF: keep the file-name or file time and no location.
       }
       return {
-        photo: { id: uid(), source: 'upload' as const, takenAt, lat, lng, people: [], fileName: file.name },
+        photo: { id: uid(), source: 'upload' as const, takenAt, wallClock: wallClock || undefined, lat, lng, people: [], fileName: file.name },
         getBlob: async () => file,
       };
     }),

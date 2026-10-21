@@ -63,6 +63,7 @@ export function Lightbox() {
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 p-4 text-sm text-slate-300" onClick={(e) => e.stopPropagation()}>
         {stop && <span className="font-medium text-white">{stopName(stop, stopIndex)}</span>}
         {photo && <span>{new Date(photo.takenAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>}
+        {photo?.locatedBy === 'timeline' && <span className="text-xs text-slate-400">Place from Google Timeline</span>}
         {photo && photo.people.length > 0 && (
           <span className="inline-flex items-center gap-1">
             <Users size={14} /> {photo.people.join(', ')}

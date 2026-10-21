@@ -1,4 +1,4 @@
-import { ArrowLeft, Cloud, FolderOpen, Images, Loader2, PencilLine, Route, Archive, X, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, Cloud, FolderOpen, Images, Loader2, MapPinned, PencilLine, Route, Archive, X, type LucideIcon } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { googleConfigured, signIn, useAuth } from '../auth/google';
 import { materialize, type PhotoCandidate } from '../import/candidate';
@@ -8,6 +8,7 @@ import { scanTakeout } from '../import/takeout';
 import { parseTrackText, trackToJourney } from '../import/tracks';
 import { savePhotos } from '../model/photos';
 import { JUNK_KINDS, KIND_LABEL, photoKind, type PhotoKind } from '../import/photoKind';
+import { makeLocator, readTimelineFiles } from '../import/timeline';
 import type { PersonFilter, Photo, Segment, Stop } from '../model/types';
 import { activeJourney, addPhotosToJourney, createJourney, notify, setTool, useStore } from '../store';
 import { clusterPhotos } from '../trail/cluster';
@@ -16,6 +17,8 @@ import { filterPhotos, hasLocation, peopleIndex } from '../trail/filter';
 import { newJourney, reconcileSegments } from '../trail/journey';
 import { findOutliers } from '../trail/outliers';
 import { DAY_MS, rangeTitle, splitIntoTrips, TRIP_GAP_DAYS } from '../trail/trips';
+import { pickFiles } from './pickFiles';
+import { TimelineHelp } from './TimelineHelp';
 
 /** Chat images are often real trip photos from friends, so only the clear junk is left out by default. */
 const DEFAULT_SKIP: PhotoKind[] = ['screenshot', 'document', 'saved'];
@@ -117,16 +120,25 @@ export function Wizard() {
     if (current) setTarget(list.every((c) => !hasLocation(c.photo)) ? 'current' : 'new');
   };
 
-  const pickFiles = (accept: string, opts: { multiple?: boolean; directory?: boolean } = {}) =>
-    new Promise<File[]>((resolve) => {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = accept;
-      input.multiple = opts.multiple ?? true;
-      if (opts.directory) input.webkitdirectory = true;
-      input.onchange = () => resolve([...(input.files ?? [])]);
-      input.click();
+  const locateWithTimeline = async () => {
+    const files = await pickFiles('.json');
+    if (!files.length || !cands) return;
+    await withBusy('Reading your Timeline…', async () => {
+      const locate = makeLocator(await readTimelineFiles(files));
+      let found = 0;
+      const missing = cands.filter((c) => !hasLocation(c.photo)).length;
+      setCands(
+        cands.map((c) => {
+          const at = hasLocation(c.photo) ? undefined : locate(c.photo);
+          if (!at) return c;
+          found++;
+          return { ...c, photo: { ...c.photo, lat: at.lat, lng: at.lng, locatedBy: 'timeline' as const } };
+        }),
+      );
+      if (found && target === 'current' && current) setTarget('new');
+      notify(found ? `Found a place for ${found} of ${missing} photos in your Timeline` : 'None of these photos fall within your Timeline data');
     });
+  };
 
   const choose = async (s: Source) => {
     setSource(s);
@@ -385,6 +397,18 @@ export function Wizard() {
                     “{current.title}”
                   </button>
                 </div>
+              </section>
+            )}
+            {inRange.some((c) => !hasLocation(c.photo)) && (
+              <section className="rounded-xl bg-white/5 p-4 text-sm">
+                <h3 className="mb-1 font-medium text-slate-200">{inRange.filter((c) => !hasLocation(c.photo)).length} photos have no location</h3>
+                <p className="mb-3 text-xs leading-relaxed text-slate-400">
+                  Your Google Timeline knows where you were when you took them. Export it and add the file here; it is read on this device only.
+                </p>
+                <button className="btn-ghost border border-white/10" disabled={!!busy} onClick={locateWithTimeline}>
+                  <MapPinned size={15} /> Find places with Google Timeline
+                </button>
+                <TimelineHelp />
               </section>
             )}
             <label className="flex items-center gap-2 text-sm text-slate-300">

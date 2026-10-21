@@ -25,6 +25,8 @@ npm run build      # production build in dist/ (also builds the share-page viewe
 
 Google shut down full-library access to Google Photos in March 2025, which is why Takeout is the main import path.
 
+**Photos without a location** can be placed from your **Google Timeline**, either while importing or later from the Photos tab ("Find places with Google Timeline"). Export it on your phone (Android: Settings → Location → Location services → Timeline → Export Timeline data; iPhone: Google Maps → Settings → Personal content → Export Timeline data). Older Takeout `Records.json` and `Semantic Location History` files work too. A photo taken during a visit gets that place; otherwise it is interpolated along your path, and photos more than 45 minutes from any Timeline point stay unplaced. Camera times without a time zone are matched against the local time in the Timeline, so a camera on home time still lines up abroad.
+
 ## Editing a trail
 
 - **Transport mode per leg.** Click a leg's mode chip to change it.

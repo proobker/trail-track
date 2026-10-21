@@ -3,6 +3,7 @@ import { toGPX, toKML } from '../src/export/exporters';
 import { parseTrackText, trackToJourney } from '../src/import/tracks';
 import { matchImageName, parseSidecar } from '../src/import/takeoutSidecar';
 import { dateFromFileName } from '../src/import/fileNameDate';
+import { makeLocator, parseTimeline, prepareFixes } from '../src/import/timeline';
 import { buildTimeline, sample } from '../src/animate/timeline';
 import { arc } from '../src/routing/route';
 
@@ -124,5 +125,66 @@ describe('timeline', () => {
     const end = sample(tl, 1);
     expect(end.drawn.features[0].geometry.coordinates).toHaveLength(3);
     expect(end.reachedStop).toBe(1);
+  });
+});
+
+describe('timeline', () => {
+  const android = {
+    semanticSegments: [
+      {
+        startTime: '2024-05-12T09:00:00.000+02:00',
+        endTime: '2024-05-12T11:00:00.000+02:00',
+        startTimeTimezoneUtcOffsetMinutes: 120,
+        visit: { topCandidate: { placeLocation: { latLng: '48.8584°, 2.2945°' } } },
+      },
+      {
+        startTime: '2024-05-12T11:00:00.000+02:00',
+        endTime: '2024-05-12T12:00:00.000+02:00',
+        timelinePath: [
+          { point: '48.86°, 2.30°', time: '2024-05-12T11:00:00.000+02:00' },
+          { point: '48.88°, 2.34°', time: '2024-05-12T12:00:00.000+02:00' },
+        ],
+      },
+    ],
+    rawSignals: [{ position: { LatLng: '1°, 1°', accuracyMeters: 5000, timestamp: '2024-05-12T13:00:00.000+02:00' } }],
+  };
+
+  it('reads the Android export and skips vague raw fixes', () => {
+    const fixes = prepareFixes(parseTimeline(android));
+    expect(fixes).toHaveLength(3);
+    expect(fixes[0]).toMatchObject({ lat: 48.8584, lng: 2.2945, off: 120, t: Date.parse('2024-05-12T07:00:00Z'), end: Date.parse('2024-05-12T09:00:00Z') });
+  });
+
+  it('reads the iPhone export', () => {
+    const fixes = parseTimeline([
+      { startTime: '2024-05-12T09:00:00.000+02:00', endTime: '2024-05-12T10:00:00.000+02:00', visit: { topCandidate: { placeLocation: 'geo:48.8584,2.2945' } } },
+      { startTime: '2024-05-12T10:00:00.000+02:00', endTime: '2024-05-12T10:30:00.000+02:00', timelinePath: [{ point: 'geo:48.87,2.31', durationMinutesOffsetFromStartTime: '10' }] },
+    ]);
+    expect(fixes.map((f) => [f.lat, f.off])).toEqual([[48.8584, 120], [48.87, 120]]);
+    expect(fixes[1].t).toBe(Date.parse('2024-05-12T08:10:00Z'));
+  });
+
+  it('reads older Takeout Records.json and Semantic Location History', () => {
+    expect(parseTimeline({ locations: [{ latitudeE7: 488584000, longitudeE7: 22945000, timestamp: '2024-05-12T07:00:00Z' }] })[0]).toMatchObject({ lat: 48.8584, lng: 2.2945 });
+    const sem = parseTimeline({
+      timelineObjects: [{ placeVisit: { location: { latitudeE7: 488584000, longitudeE7: 22945000 }, duration: { startTimestamp: '2024-05-12T07:00:00Z', endTimestamp: '2024-05-12T09:00:00Z' } } }],
+    });
+    expect(sem[0]).toMatchObject({ lat: 48.8584, end: Date.parse('2024-05-12T09:00:00Z') });
+  });
+
+  it('places photos by visit, then path, then not at all', () => {
+    const locate = makeLocator(prepareFixes(parseTimeline(android)));
+    expect(locate({ takenAt: Date.parse('2024-05-12T08:00:00Z') })).toEqual({ lat: 48.8584, lng: 2.2945, via: 'visit' });
+    const mid = locate({ takenAt: Date.parse('2024-05-12T09:30:00Z') })!;
+    expect(mid.via).toBe('path');
+    expect(mid.lat).toBeCloseTo(48.87);
+    expect(locate({ takenAt: Date.parse('2024-05-13T09:00:00Z') })).toBeUndefined();
+  });
+
+  it('matches clock-only photo times against the local time where they were taken', () => {
+    const locate = makeLocator(prepareFixes(parseTimeline(android)));
+    // 10:00 on the camera's clock in Paris, whatever zone this machine is in.
+    const takenAt = new Date(2024, 4, 12, 10, 0).getTime();
+    expect(locate({ takenAt, wallClock: true })?.via).toBe('visit');
   });
 });

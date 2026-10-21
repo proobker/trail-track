@@ -3,9 +3,10 @@ import type { LineString } from 'geojson';
 import { reverseGeocode } from './geo/reverse';
 import { db } from './model/db';
 import { History } from './model/history';
-import { journeyPhotos } from './model/photos';
-import { uid, type Journey, type Mode, type Segment, type Stop } from './model/types';
+import { journeyPhotos, savePhotos } from './model/photos';
+import { uid, type Journey, type Mode, type Photo, type Segment, type Stop } from './model/types';
 import { routeBetween } from './routing/route';
+import { clusterPhotos } from './trail/cluster';
 import { mergeWithNext, splitStop as splitStopPure } from './trail/edit';
 import { reconcileSegments } from './trail/journey';
 import { splitJourney } from './trail/trips';
@@ -355,6 +356,18 @@ export function removePhotos(ids: string[]) {
   setStops({ ...j, loosePhotoIds: (j.loosePhotoIds ?? []).filter((id) => !gone.has(id)) }, stops);
   if (get().selectedStopId && !stops.some((s) => s.id === get().selectedStopId)) set({ selectedStopId: undefined });
   notify(`Removed ${ids.length} photo${ids.length === 1 ? '' : 's'}`, { label: 'Undo', run: undo });
+}
+
+/** Moves loose photos that now have a location (e.g. from Google Timeline) onto the trail as stops. */
+export async function placeLoosePhotos(placed: Photo[]) {
+  const j = activeJourney();
+  if (!j || !placed.length) return;
+  await savePhotos(placed);
+  const ids = new Set(placed.map((p) => p.id));
+  const merged = [...j.stops, ...clusterPhotos(placed)];
+  // Keep chronological order when every stop has a time; otherwise append.
+  if (merged.every((s) => s.arrivedAt != null)) merged.sort((a, b) => a.arrivedAt! - b.arrivedAt!);
+  setStops({ ...j, loosePhotoIds: (j.loosePhotoIds ?? []).filter((id) => !ids.has(id)) }, merged);
 }
 
 /** Cuts the active journey into separate journeys before each of the given stop indexes. */
