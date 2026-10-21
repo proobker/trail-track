@@ -12,7 +12,7 @@ import { useIsMobile } from './useMedia';
 function JourneyCard({ j, active }: { j: Journey; active: boolean }) {
   const st = journeyStats(j);
   const modes = STACK_ORDER.filter((m) => st.byMode.get(m));
-  const when = st.start ? new Date(st.start).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : 'Undated';
+  const when = st.start != null ? new Date(st.start).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : 'Undated';
   return (
     <div
       role="button"
@@ -24,10 +24,11 @@ function JourneyCard({ j, active }: { j: Journey; active: boolean }) {
     >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium text-slate-100">{j.title}</div>
+          <div className="truncate text-sm font-medium text-slate-100" title={j.title}>{j.title}</div>
           <div className="mt-0.5 truncate text-xs text-slate-500">
-            {when} · {formatKm(st.totalKm * 1000)} · {j.stops.length} stops
+            {when}{j.stops.length > 0 ? ` · ${formatKm(st.totalKm * 1000)} · ${j.stops.length} stops` : ' · Not mapped yet'} · {st.photoCount + st.loosePhotoCount} photos
           </div>
+          {st.loosePhotoCount > 0 && <div className="mt-0.5 text-xs text-amber-300/80">{st.loosePhotoCount} photo{st.loosePhotoCount === 1 ? '' : 's'} need{st.loosePhotoCount === 1 ? 's' : ''} a place</div>}
         </div>
         <Popover label="Journey actions" align="right" triggerClassName="icon-btn -mr-1 h-7 w-7 opacity-0 group-hover:opacity-100 focus-visible:opacity-100" trigger={<MoreHorizontal size={15} />} className="w-44">
           {(close) => (

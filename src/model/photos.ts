@@ -28,6 +28,13 @@ export const journeyPhotos = () => usePhotoCache.getState().photos;
 
 export async function savePhotos(photos: Photo[]) {
   await db.photos.bulkPut(photos);
+  for (const p of photos) {
+    for (const key of [`t:${p.id}`, `p:${p.id}`]) {
+      const url = urls.get(key);
+      if (url) URL.revokeObjectURL(url);
+      urls.delete(key);
+    }
+  }
   usePhotoCache.setState((s) => {
     const next = new Map(s.photos);
     for (const p of photos) next.set(p.id, p);

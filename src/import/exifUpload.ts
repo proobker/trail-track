@@ -22,7 +22,8 @@ export async function scanUploads(files: File[]): Promise<PhotoCandidate[]> {
       let takenAt = fromName ?? file.lastModified;
       let wallClock = fromName != null;
       try {
-        const tags = await exifr.parse(file, { gps: true, pick: ['DateTimeOriginal', 'CreateDate', 'OffsetTimeOriginal', 'OffsetTime', 'latitude', 'longitude'] });
+        // Pick raw GPS tags: latitude/longitude are computed outputs, not selectable EXIF tags.
+        const tags = await exifr.parse(file, { gps: true, pick: ['DateTimeOriginal', 'CreateDate', 'OffsetTimeOriginal', 'OffsetTime', 'GPSLatitude', 'GPSLatitudeRef', 'GPSLongitude', 'GPSLongitudeRef'] });
         if (tags && Number.isFinite(tags.latitude) && Number.isFinite(tags.longitude)) {
           lat = tags.latitude;
           lng = tags.longitude;

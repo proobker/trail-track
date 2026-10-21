@@ -40,7 +40,8 @@ function dateRange(start?: number, end?: number) {
 
 function JourneyPanel({ j }: { j: Journey }) {
   const photos = useJourneyPhotos(j);
-  const [tab, setTab] = useState<Tab>('route');
+  const [tab, setTab] = useState<Tab>(!j.stops.length && j.loosePhotoIds?.length ? 'photos' : 'route');
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
   const st = journeyStats(j);
   const days = groupByDay(j).filter((d) => d.date).length;
   const looseCount = j.loosePhotoIds?.length ?? 0;
@@ -59,16 +60,20 @@ function JourneyPanel({ j }: { j: Journey }) {
           key={j.id}
           aria-label="Journey name"
           className="font-display -mx-1 w-full rounded-md bg-transparent px-1 text-xl font-semibold text-white outline-none hover:bg-white/5 focus:bg-white/5"
-          defaultValue={j.title}
+          value={nameDraft ?? j.title}
+          onChange={(e) => setNameDraft(e.target.value)}
           onKeyDown={(e) => {
             e.stopPropagation();
             if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
           }}
-          onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== j.title && renameJourney(j.id, e.target.value.trim())}
+          onBlur={() => {
+            if (nameDraft?.trim() && nameDraft.trim() !== j.title) renameJourney(j.id, nameDraft.trim());
+            setNameDraft(null);
+          }}
         />
         <div className="mt-0.5 text-xs text-slate-400">{dateRange(st.start, st.end)}</div>
         <div className="mt-3 grid grid-cols-4 gap-1.5">
-          <Stat value={formatKm(st.totalKm * 1000)} label="distance" />
+          <Stat value={j.segments.length ? formatKm(st.totalKm * 1000) : '—'} label="distance" />
           <Stat value={String(days || '—')} label={days === 1 ? 'day' : 'days'} />
           <Stat value={String(j.stops.length)} label="stops" />
           <Stat value={String(st.photoCount + looseCount)} label="photos" />
@@ -91,7 +96,7 @@ function JourneyPanel({ j }: { j: Journey }) {
         ))}
       </nav>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        {tab === 'route' && <RouteTab j={j} photos={photos} />}
+        {tab === 'route' && <RouteTab j={j} photos={photos} onShowPhotos={() => setTab('photos')} />}
         {tab === 'photos' && <PhotosTab j={j} photos={photos} />}
         {tab === 'stats' && <StatsTab j={j} />}
         {tab === 'share' && <ShareTab j={j} />}
@@ -229,7 +234,7 @@ export function Panel() {
   const view = useStore((s) => s.view);
   const open = usePrefs((s) => s.panelOpen);
   const mobile = useIsMobile();
-  const content = view === 'world' ? <WorldPanel /> : j ? <JourneyPanel j={j} /> : null;
+  const content = view === 'world' ? <WorldPanel /> : j ? <JourneyPanel key={j.id} j={j} /> : null;
   if (!content) return null;
   if (mobile) return <BottomSheet>{content}</BottomSheet>;
   return (

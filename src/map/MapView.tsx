@@ -41,6 +41,14 @@ export function setHoverPoint(coord?: [number, number]) {
   if (map) setData(map, 'hover', coord ? { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: coord } }] } : EMPTY);
 }
 
+function drawTrailPreview(map: MlMap) {
+  const { view, trailPreview } = useStore.getState();
+  setData(map, 'trail-candidate', view === 'journey' && trailPreview ? {
+    type: 'FeatureCollection',
+    features: trailPreview.lines.map((coordinates) => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } })),
+  } : EMPTY);
+}
+
 function applyTerrain(map: MlMap) {
   const { terrain, globe } = usePrefs.getState();
   map.setProjection({ type: globe ? 'globe' : 'mercator' });
@@ -116,6 +124,7 @@ export function MapView() {
       applyTerrain(map);
       ready.current = true;
       redraw(map, true);
+      drawTrailPreview(map);
     });
 
     map.on('click', (e: MapMouseEvent) => {
@@ -184,8 +193,11 @@ export function MapView() {
         setData(m, 'world', EMPTY);
         setData(m, 'world-points', EMPTY);
       }
-      setData(m, 'trail', trailData(j));
-      setData(m, 'stops', stopsData(j));
+      // These sources are static during playback; only the drawn line and head change each frame.
+      if (force || shown.j !== j || shown.world) {
+        setData(m, 'trail', trailData(j));
+        setData(m, 'stops', stopsData(j));
+      }
       if (!j || (!playing && progress >= 1)) {
         setData(m, 'drawn', trailData(j));
         setData(m, 'head', EMPTY);
@@ -260,6 +272,12 @@ export function MapView() {
       ready.current = false;
     };
   }, []);
+
+  const trailPreview = useStore((s) => s.trailPreview);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && ready.current) drawTrailPreview(map);
+  }, [trailPreview, view]);
 
   // Base style, projection and terrain.
   const firstStyle = useRef(true);

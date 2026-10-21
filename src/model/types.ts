@@ -69,6 +69,10 @@ export type PersonFilter = { mode: 'any' } | { mode: 'none' } | { mode: 'person'
 export interface Journey {
   id: string;
   title: string;
+  /** A named trail confirmed by the user; the journey geometry remains independent. */
+  namedTrail?: { source: 'osm'; type: 'relation' | 'way'; id: number; name: string; ref?: string };
+  /** Keep the title in sync with visited locations; false preserves an explicit name. */
+  autoTitle?: boolean;
   dateFrom?: string;
   dateTo?: string;
   personFilter: PersonFilter;

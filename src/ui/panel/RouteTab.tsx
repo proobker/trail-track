@@ -10,6 +10,7 @@ import { DAY_MS, journeyTrips } from '../../trail/trips';
 import { ModeIcon } from '../icons';
 import { formatKm, ModeChip } from '../ModeChip';
 import { MenuItem, Popover } from '../Popover';
+import { NamedTrails } from './NamedTrails';
 
 const time = (t?: number) => (t == null ? '' : new Date(t).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }));
 
@@ -157,7 +158,7 @@ function StopRow({ stop, index, count, photos, selected }: { stop: Stop; index: 
   );
 }
 
-export function RouteTab({ j, photos }: { j: Journey; photos: Map<string, Photo> }) {
+export function RouteTab({ j, photos, onShowPhotos }: { j: Journey; photos: Map<string, Photo>; onShowPhotos?: () => void }) {
   const selectedStopId = useStore((s) => s.selectedStopId);
   const selectedSegmentId = useStore((s) => s.selectedSegmentId);
   const segFrom = new Map(j.segments.map((s) => [s.fromStopId, s]));
@@ -173,7 +174,8 @@ export function RouteTab({ j, photos }: { j: Journey; photos: Map<string, Photo>
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-400/10 text-emerald-300">
           <MapPinPlus size={22} />
         </div>
-        <p className="text-sm text-slate-400">No stops yet. Click the map to drop them, or search for a place above.</p>
+        <p className="text-sm text-slate-400">{j.loosePhotoIds?.length ? `${j.loosePhotoIds.length} photos are saved. Restore their original GPS, use Timeline, or pin them to build this route.` : 'No stops yet. Click the map to drop them, or search for a place above.'}</p>
+        {!!j.loosePhotoIds?.length && onShowPhotos && <button className="btn-primary" onClick={onShowPhotos}>View and place photos</button>}
         <button className="btn-primary" onClick={() => setTool('add')}>
           Start adding stops
         </button>
@@ -201,6 +203,7 @@ export function RouteTab({ j, photos }: { j: Journey; photos: Map<string, Photo>
 
   return (
     <div className="pb-24">
+      <NamedTrails journey={j} selectedSegmentId={selectedSegmentId} />
       {trips.cuts.length > 0 && (
         <div className="m-3 rounded-xl border border-amber-300/20 bg-amber-300/[0.06] p-3 text-xs leading-relaxed text-amber-100/90">
           {homeCount > 0

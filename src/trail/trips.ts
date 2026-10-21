@@ -1,6 +1,8 @@
 import { uid, type Journey } from '../model/types';
 import { localDay } from './days';
 import { metres } from './geo';
+import { rangeTitle, usesAutomaticTitle, withJourneyTitle } from './naming';
+export { rangeTitle } from './naming';
 
 export const DAY_MS = 86_400_000;
 /** Away from home, photos at least this many days apart are treated as separate trips. */
@@ -18,10 +20,6 @@ const MIN_HOME_SHARE = 0.3;
 const MIN_SPAN_DAYS = 45;
 /** A stop back home shorter than this, between two trips, is a layover: the trips are one. */
 const LAYOVER_MS = 12 * 3_600_000;
-
-/** Default journey name for a date range, e.g. "12 May 2024" or "2024-05-12 → 2024-05-19". */
-export const rangeTitle = (from: string, to: string) =>
-  from === to ? new Date(`${from}T12:00`).toLocaleDateString(undefined, { dateStyle: 'long' }) : `${from} → ${to}`;
 
 export interface TripPoint {
   t: number;
@@ -153,7 +151,7 @@ export function journeyTrips(j: Journey, gapMs: number = TRIP_GAP_DAYS * DAY_MS)
 /**
  * Cuts a journey before each stop index in `cuts`. The first part keeps the journey's id; legs that
  * crossed a cut are dropped. Loose photos go to the part whose time span they fall in. Auto-named
- * journeys get fresh date-range names; others become "Title (2)", "Title (3)", … Parts flagged in
+ * journeys get fresh place names (dates until places are known); others become "Title (2)", "Title (3)", … Parts flagged in
  * `homeParts` are named "At home · …".
  */
 export function splitJourney(j: Journey, cuts: number[], takenAt: (photoId: string) => number | undefined, homeParts: boolean[] = []): Journey[] {
@@ -161,7 +159,7 @@ export function splitJourney(j: Journey, cuts: number[], takenAt: (photoId: stri
   const parts = bounds.slice(1).map((end, k) => j.stops.slice(bounds[k], end));
   const starts = parts.map((stops) => stops.find((s) => s.arrivedAt != null)?.arrivedAt ?? Infinity);
   const partOf = (t = -Infinity) => starts.reduce((at, start, k) => (t >= start ? k : at), 0);
-  const autoNamed = !!j.dateFrom && !!j.dateTo && j.title === rangeTitle(j.dateFrom, j.dateTo);
+  const autoNamed = usesAutomaticTitle(j);
 
   return parts.map((stops, k) => {
     const ids = new Set(stops.map((s) => s.id));
@@ -170,16 +168,18 @@ export function splitJourney(j: Journey, cuts: number[], takenAt: (photoId: stri
     const dateTo = times.length ? localDay(Math.max(...times)) : undefined;
     const dated = dateFrom && dateTo ? rangeTitle(dateFrom, dateTo) : undefined;
     const title = homeParts[k] && dated ? `At home · ${dated}` : autoNamed && dated ? dated : k === 0 ? j.title : `${j.title} (${k + 1})`;
-    return {
+    return withJourneyTitle({
       ...j,
       id: k === 0 ? j.id : uid(),
+      namedTrail: undefined,
       title,
+      autoTitle: autoNamed,
       dateFrom,
       dateTo,
       stops,
       segments: j.segments.filter((s) => ids.has(s.fromStopId) && ids.has(s.toStopId)),
       loosePhotoIds: (j.loosePhotoIds ?? []).filter((id) => partOf(takenAt(id)) === k),
       updatedAt: Date.now(),
-    };
+    });
   });
 }

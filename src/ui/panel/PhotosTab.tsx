@@ -3,6 +3,10 @@ import { useState } from 'react';
 import { JUNK_KINDS, KIND_LABEL, photoKind } from '../../import/photoKind';
 import { makeLocator, readTimelineFiles } from '../../import/timeline';
 import { findTextHeavy } from '../../import/textHeavy';
+import { scanUploads } from '../../import/exifUpload';
+import { materialize } from '../../import/candidate';
+import { matchOriginals } from '../../trail/repair';
+import { restoreJourneyPhotos } from '../../store';
 import { thumbUrl } from '../../model/photos';
 import { stopName, type Journey, type Photo } from '../../model/types';
 import { attachLoose, notify, openLightbox, placeLoosePhotos, removePhotos, setTool, undo, useStore } from '../../store';
@@ -39,6 +43,7 @@ export function PhotosTab({ j, photos }: { j: Journey; photos: Map<string, Photo
     j.stops.filter((s) => s.arrivedAt != null).sort((a, b) => Math.abs(a.arrivedAt! - p.takenAt) - Math.abs(b.arrivedAt! - p.takenAt))[0] ?? j.stops[0];
 
   const everyId = [...all, ...(j.loosePhotoIds ?? [])];
+  const unavailable = everyId.filter((id) => !photos.has(id));
   const byKind = JUNK_KINDS.map((k) => ({ kind: k, ids: everyId.filter((id) => { const p = photos.get(id); return p && photoKind(p) === k; }) })).filter((g) => g.ids.length);
   const pick = (id: string) =>
     setPicked((s) => {
@@ -47,6 +52,25 @@ export function PhotosTab({ j, photos }: { j: Journey; photos: Map<string, Photo
       return next;
     });
   const stopSelecting = () => (setSelecting(false), setPicked(new Set()));
+  const restoreOriginals = async () => {
+    const files = await pickFiles('image/*,.heic,.heif,.tif,.tiff');
+    if (!files.length) return;
+    setBusy(true);
+    try {
+      const scanned = await scanUploads(files);
+      const names = new Set(everyId.flatMap((id) => photos.get(id)?.fileName ?? []));
+      const originals = await materialize(scanned.filter((c) => names.has(c.photo.fileName)));
+      const existing = everyId.flatMap((id) => photos.get(id) ?? []);
+      const restored = matchOriginals(existing, originals);
+      if (!restored.length) return notify('No unique matching filenames found. Choose the original files for these photos.');
+      const placed = await restoreJourneyPhotos(j.id, restored);
+      notify(`Restored ${restored.length} photos; ${placed ?? 0} gained a map location. Unmatched or ambiguous filenames were skipped.`);
+    } catch (e) {
+      notify((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
   const selectTextHeavy = async () => {
     const candidates = everyId.flatMap((id) => {
       const p = photos.get(id);
@@ -92,8 +116,10 @@ export function PhotosTab({ j, photos }: { j: Journey; photos: Map<string, Photo
 
   return (
     <div className="space-y-6 p-4 pb-24">
+      {unavailable.length > 0 && <p role="status" className="text-xs text-amber-200">{unavailable.length} saved photo record{unavailable.length === 1 ? ' is' : 's are'} not loaded. If this persists, restore a backup containing the photos.</p>}
       {everyId.length > 0 && (
         <div className="space-y-2">
+          <button className="btn-ghost w-full border border-white/10 text-xs" disabled={busy} onClick={restoreOriginals}>Restore GPS / previews from originals</button>
           <div className="flex items-center justify-between gap-2">
             {selecting ? (
               <>
@@ -132,7 +158,7 @@ export function PhotosTab({ j, photos }: { j: Journey; photos: Map<string, Photo
       {loose.length > 0 && (
         <section>
           <h3 className="section-title">Needs a place · {loose.length}</h3>
-          <p className="mb-3 text-xs leading-relaxed text-slate-500">These have no location, so they sit along the trail by the time they were taken (dashed on the map). Pin one exactly, or attach it to the closest stop in time.</p>
+          <p className="mb-3 text-xs leading-relaxed text-slate-500">{j.stops.length ? 'These photos have no location. Their estimated positions along the trail use the time they were taken. Pin one exactly, or attach it to a stop.' : 'These photos have no saved location, so this journey cannot be mapped or named by place yet. Use Google Timeline, pin photos on the map, or re-import original photos with GPS.'}</p>
           {!selecting && (
             <div className="mb-3 rounded-xl bg-white/[0.03] p-3">
               <button className="btn-ghost w-full border border-white/10 py-1.5 text-xs" disabled={busy} onClick={placeWithTimeline}>
@@ -174,7 +200,7 @@ export function PhotosTab({ j, photos }: { j: Journey; photos: Map<string, Photo
       <section>
         <h3 className="section-title">On the trail · {all.length}</h3>
         {all.length === 0 ? (
-          <p className="text-xs text-slate-500">No photos on this journey yet.</p>
+          <p className="text-xs text-slate-500">{j.loosePhotoIds?.length ? 'This journey has saved photos waiting for a place.' : 'No photos on this journey yet.'}</p>
         ) : (
           <div className="grid grid-cols-4 gap-1.5">
             {all.map((id) => (

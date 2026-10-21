@@ -43,12 +43,17 @@ export function journeyStats(j: Journey) {
     total += m;
     byMode.set(s.mode, (byMode.get(s.mode) ?? 0) + m);
   }
-  const times = j.stops.map((s) => s.arrivedAt).filter((t): t is number => t != null);
+  const times = j.stops.map((s) => s.arrivedAt).filter((t): t is number => t != null && Number.isFinite(t));
+  const dateTime = (day?: string) => {
+    const t = day ? new Date(`${day}T12:00`).getTime() : NaN;
+    return Number.isFinite(t) ? t : undefined;
+  };
   return {
     totalKm: total / 1000,
     byMode,
     photoCount: j.stops.reduce((n, s) => n + s.photoIds.length, 0),
-    start: times.length ? Math.min(...times) : undefined,
-    end: times.length ? Math.max(...times) : undefined,
+    loosePhotoCount: j.loosePhotoIds?.length ?? 0,
+    start: times.length ? Math.min(...times) : dateTime(j.dateFrom ?? j.dateTo),
+    end: times.length ? Math.max(...times) : dateTime(j.dateTo ?? j.dateFrom),
   };
 }

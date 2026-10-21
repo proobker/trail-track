@@ -177,7 +177,7 @@ export function Wizard() {
   const choose = async (s: Source) => {
     setSource(s);
     if (s === 'manual') {
-      await createJourney(newJourney(title || 'New journey'));
+      await createJourney(newJourney(title || 'New journey', { autoTitle: !title.trim() }));
       setTool('add');
       notify('Click the map to add stops, or search for a place');
       close();
@@ -199,7 +199,7 @@ export function Wizard() {
       // Join consecutive files with a routed connector where they don't already meet.
       const { segments: all, needsRouting } = reconcileSegments(stops, segments);
       const name = title || files[0].name.replace(/\.[^.]+$/, '');
-      await createJourney(newJourney(name, { stops, segments: all }), needsRouting);
+      await createJourney(newJourney(name, { autoTitle: !title.trim(), stops, segments: all }), needsRouting);
       notify(`Imported ${segments.length} track${segments.length === 1 ? '' : 's'}`);
       close();
     });
@@ -252,7 +252,7 @@ export function Wizard() {
           const from = many ? localDay(trip[0].photo.takenAt) : dateFrom;
           const to = many ? localDay(trip[trip.length - 1].photo.takenAt) : dateTo;
           const name = title ? (many ? `${title} (${i + 1})` : title) : rangeTitle(from, to);
-          await createJourney(newJourney(name, { dateFrom: from, dateTo: to, personFilter: person, stops, segments, loosePhotoIds: loose }), needsRouting);
+          await createJourney(newJourney(name, { autoTitle: !title.trim(), dateFrom: from, dateTo: to, personFilter: person, stops, segments, loosePhotoIds: loose }), needsRouting);
         }
         notify(
           chosen.length > 1
@@ -551,7 +551,7 @@ export function Wizard() {
                 )}
               </section>
             )}
-            {target === 'new' && <input className="input" placeholder={chosen.length > 1 ? 'Name prefix (optional, default is the dates)' : 'Journey name (optional)'} value={title} onChange={(e) => setTitle(e.target.value)} />}
+            {target === 'new' && <input className="input" placeholder="Name (optional, uses visited locations)" value={title} onChange={(e) => setTitle(e.target.value)} />}
 
             <div className="flex items-center justify-between rounded-xl bg-white/5 p-4">
               <div className="text-sm">

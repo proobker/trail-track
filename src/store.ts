@@ -10,6 +10,10 @@ import { clusterPhotos } from './trail/cluster';
 import { mergeWithNext, splitStop as splitStopPure } from './trail/edit';
 import { reconcileSegments } from './trail/journey';
 import { splitJourney } from './trail/trips';
+import { withJourneyTitle } from './trail/naming';
+import { repairJourneyDates } from './trail/repair';
+import { hasLocation } from './trail/filter';
+import type { TrailCandidate } from './trail/namedTrails';
 
 export type Tool = 'view' | 'add' | 'draw' | 'pin';
 
@@ -38,6 +42,8 @@ interface State {
   draft?: [number, number][];
   selectedStopId?: string;
   selectedSegmentId?: string;
+  /** Temporary map overlay while reviewing a named trail candidate. */
+  trailPreview?: TrailCandidate;
   /** Segment ids currently being routed. */
   routing: Set<string>;
   toast?: { id: number; text: string; action?: ToastAction };
@@ -92,7 +98,15 @@ export function confirmDialog(req: Omit<DialogRequest, 'resolve'>): Promise<bool
 }
 
 export async function loadJourneys() {
-  const journeys = await db.journeys.orderBy('updatedAt').reverse().toArray();
+  const stored = await db.journeys.orderBy('updatedAt').reverse().toArray();
+  const journeys: Journey[] = [];
+  for (const j of stored) {
+    const ids = [...new Set([...j.stops.flatMap((s) => s.photoIds), ...(j.loosePhotoIds ?? [])])];
+    const photos = (await db.photos.bulkGet(ids)).filter((p): p is Photo => !!p);
+    journeys.push(withJourneyTitle(repairJourneyDates(j, new Map(photos.map((p) => [p.id, p])))));
+  }
+  const changed = journeys.filter((j, i) => j !== stored[i]);
+  if (changed.length) await db.journeys.bulkPut(changed);
   set({ journeys, activeId: get().activeId ?? journeys[0]?.id });
   for (const j of journeys) void geocodeStops(j.id);
 }
@@ -103,13 +117,14 @@ function save(j: Journey, opts: { history?: boolean } = {}) {
     history.push(j.id, prev);
     set((s) => ({ historyVersion: s.historyVersion + 1 }));
   }
-  const next = { ...j, updatedAt: Date.now() };
+  const next = { ...withJourneyTitle(repairJourneyDates(j, journeyPhotos())), updatedAt: Date.now() };
   set((s) => ({ journeys: s.journeys.map((x) => (x.id === j.id ? next : x)) }));
   db.journeys.put(next).catch((e) => notify(`Could not save: ${e.message}`));
   return next;
 }
 
 export async function createJourney(j: Journey, toRoute: string[] = []) {
+  j = withJourneyTitle(j);
   await db.journeys.put(j);
   set((s) => ({
     journeys: [j, ...s.journeys],
@@ -117,6 +132,7 @@ export async function createJourney(j: Journey, toRoute: string[] = []) {
     view: 'journey',
     selectedStopId: undefined,
     selectedSegmentId: undefined,
+    trailPreview: undefined,
     player: { ...s.player, progress: 1, playing: false },
   }));
   if (toRoute.length) void routeSegments(j.id, toRoute);
@@ -124,11 +140,11 @@ export async function createJourney(j: Journey, toRoute: string[] = []) {
 }
 
 export function selectJourney(id: string) {
-  set((s) => ({ activeId: id, view: 'journey', drawerOpen: false, selectedStopId: undefined, selectedSegmentId: undefined, tool: 'view', player: { ...s.player, playing: false, progress: 1 } }));
+  set((s) => ({ activeId: id, view: 'journey', drawerOpen: false, selectedStopId: undefined, selectedSegmentId: undefined, trailPreview: undefined, tool: 'view', player: { ...s.player, playing: false, progress: 1 } }));
 }
 
 export function showWorld() {
-  set((s) => ({ view: 'world', drawerOpen: false, tool: 'view', selectedStopId: undefined, selectedSegmentId: undefined, player: { ...s.player, playing: false, progress: 1 } }));
+  set((s) => ({ view: 'world', drawerOpen: false, tool: 'view', selectedStopId: undefined, selectedSegmentId: undefined, trailPreview: undefined, player: { ...s.player, playing: false, progress: 1 } }));
 }
 
 /** Removes a journey with a short window to undo it. */
@@ -151,7 +167,12 @@ export async function deleteJourney(id: string) {
 
 export function renameJourney(id: string, title: string) {
   const j = get().journeys.find((x) => x.id === id);
-  if (j) save({ ...j, title });
+  if (j) save({ ...j, title, autoTitle: false });
+}
+
+export function setNamedTrail(id: string, namedTrail?: Journey['namedTrail']) {
+  const j = get().journeys.find((x) => x.id === id);
+  if (j) save({ ...j, namedTrail });
 }
 
 /** Replaces a journey's stops, keeps unchanged segments and routes the new ones. */
@@ -368,6 +389,20 @@ export async function placeLoosePhotos(placed: Photo[]) {
   // Keep chronological order when every stop has a time; otherwise append.
   if (merged.every((s) => s.arrivedAt != null)) merged.sort((a, b) => a.arrivedAt! - b.arrivedAt!);
   setStops({ ...j, loosePhotoIds: (j.loosePhotoIds ?? []).filter((id) => !ids.has(id)) }, merged);
+}
+
+/** Restore previews/GPS in place, then map only the journey's previously loose photos. */
+export async function restoreJourneyPhotos(journeyId: string, restored: Photo[]) {
+  await savePhotos(restored);
+  const j = get().journeys.find((x) => x.id === journeyId);
+  if (!j) return;
+  const loose = new Set(j.loosePhotoIds ?? []);
+  const located = restored.filter((p) => loose.has(p.id) && hasLocation(p));
+  const ids = new Set(located.map((p) => p.id));
+  const stops = [...j.stops, ...clusterPhotos(located)];
+  if (stops.every((s) => s.arrivedAt != null)) stops.sort((a, b) => a.arrivedAt! - b.arrivedAt!);
+  setStops({ ...j, loosePhotoIds: [...loose].filter((id) => !ids.has(id)) }, stops);
+  return located.length;
 }
 
 /** Cuts the active journey into separate journeys before each of the given stop indexes. */

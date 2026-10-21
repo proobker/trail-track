@@ -30,7 +30,7 @@ export function stopsData(j?: Journey): FeatureCollection<Point> {
 
 /** Adds all trail sources and layers. Safe to call again after a style change. */
 export function addTrailLayers(map: MlMap) {
-  for (const id of ['world', 'world-points', 'trail', 'drawn', 'stops', 'head', 'draft', 'hover']) {
+  for (const id of ['world', 'world-points', 'trail', 'drawn', 'stops', 'head', 'draft', 'hover', 'trail-candidate']) {
     if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: EMPTY, lineMetrics: id === 'drawn' });
   }
   const line = (id: string, source: string, paint: Record<string, unknown>, filter?: ExpressionSpecification) => {
@@ -71,6 +71,7 @@ export function addTrailLayers(map: MlMap) {
   }
   line('trail-flow', 'drawn', { 'line-color': '#ffffff', 'line-width': 1.6, 'line-opacity': 0.75, 'line-dasharray': FLOW_STEPS[0] }, ['in', ['get', 'mode'], ['literal', SOLID]]);
   line('draft', 'draft', { 'line-color': '#ffffff', 'line-width': 2.5, 'line-dasharray': [2, 1.5] });
+  line('trail-candidate-line', 'trail-candidate', { 'line-color': '#facc15', 'line-width': 5, 'line-opacity': 0.9, 'line-dasharray': [2, 1] });
   // Wide invisible line so segments are easy to click.
   line('trail-hit', 'trail', { 'line-color': '#000', 'line-width': 18, 'line-opacity': 0 });
 
