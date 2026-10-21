@@ -7,6 +7,7 @@ import { newJourney, reconcileSegments } from '../src/trail/journey';
 import { DAY_MS, findHome, groupTrips, journeyTrips, rangeTitle, splitJourney, type TripPoint } from '../src/trail/trips';
 import { photoKind } from '../src/import/photoKind';
 import { placeUnlocated } from '../src/trail/placeUnlocated';
+import { matchUnlocated } from '../src/trail/matchUnlocated';
 
 const H = 3_600_000;
 const T0 = Date.parse('2026-05-01T08:00:00');
@@ -75,6 +76,21 @@ describe('clusterPhotos', () => {
     expect(clusterPhotos([first, duplicate])).toHaveLength(1);
     expect(clusterPhotos([first, different])).toHaveLength(2);
   });
+  it('uses optional on-device scene similarity only for nearby photos in the same visit', () => {
+    const first = photo({ lat: 0, lng: 0, takenAt: T0 });
+    const related = photo({ lat: 0, lng: 0.0016, takenAt: T0 + 5 * 60_000 });
+    const later = photo({ lat: 0, lng: 0.0016, takenAt: T0 + DAY_MS });
+    const embeddings = new Map([
+      [first.id, new Float32Array([1, 0])],
+      [related.id, new Float32Array([0.95, Math.sqrt(1 - 0.95 ** 2)])],
+      [later.id, new Float32Array([1, 0])],
+    ]);
+    expect(clusterPhotos([first, related])).toHaveLength(2);
+    expect(clusterPhotos([first, related], undefined, embeddings)).toHaveLength(1);
+    expect(clusterPhotos([first, later], undefined, embeddings)).toHaveLength(2);
+    embeddings.set(related.id, new Float32Array([0, 1]));
+    expect(clusterPhotos([first, related], undefined, embeddings)).toHaveLength(2);
+  });
 });
 
 describe('inferMode', () => {
@@ -101,6 +117,37 @@ describe('placeUnlocated', () => {
   });
   it('returns nothing without timed stops', () => {
     expect(placeUnlocated([photo({})], [stop({})])).toEqual([]);
+  });
+});
+
+describe('matchUnlocated', () => {
+  it('attaches a near-duplicate to a located photo from the same visit', () => {
+    const known = photo({ lat: 0, lng: 0, visualHash: '0f0f0f0f0f0f0f0f', takenAt: T0 });
+    const missing = photo({ visualHash: '0f0f0f0f0f0f0f0e', takenAt: T0 + 5 * 60_000 });
+    const s = stop({ photoIds: [known.id], arrivedAt: T0 });
+    const result = matchUnlocated([known, missing], [s]);
+    expect(result.stops[0].photoIds).toEqual([known.id, missing.id]);
+    expect(result.looseIds).toEqual([]);
+    expect(result.matched).toBe(1);
+  });
+  it('uses scene embeddings only when the match is clear and close in time', () => {
+    const a = photo({ lat: 0, lng: 0, takenAt: T0 });
+    const b = photo({ lat: 0, lng: 1, takenAt: T0 });
+    const missing = photo({ takenAt: T0 + 5 * 60_000 });
+    const late = photo({ takenAt: T0 + DAY_MS });
+    const s1 = stop({ photoIds: [a.id], arrivedAt: T0 });
+    const s2 = stop({ photoIds: [b.id], arrivedAt: T0 });
+    const embeddings = new Map([
+      [a.id, new Float32Array([1, 0])],
+      [b.id, new Float32Array([0, 1])],
+      [missing.id, new Float32Array([0.98, Math.sqrt(1 - 0.98 ** 2)])],
+      [late.id, new Float32Array([1, 0])],
+    ]);
+    const result = matchUnlocated([a, b, missing, late], [s1, s2], embeddings);
+    expect(result.stops[0].photoIds).toEqual([a.id, missing.id]);
+    expect(result.looseIds).toEqual([late.id]);
+    embeddings.set(b.id, new Float32Array([1, 0]));
+    expect(matchUnlocated([a, b, missing], [s1, s2], embeddings).looseIds).toEqual([missing.id]);
   });
 });
 

@@ -2,6 +2,7 @@ import { ArrowLeft, Cloud, FolderOpen, Images, Loader2, MapPinned, PencilLine, R
 import { useEffect, useMemo, useState } from 'react';
 import { googleConfigured, signIn, useAuth } from '../auth/google';
 import { materialize, type PhotoCandidate } from '../import/candidate';
+import { analyzePhotoScenes, type SceneEmbeddings } from '../import/sceneAnalysis';
 import { scanUploads } from '../import/exifUpload';
 import { pickFromGooglePhotos } from '../import/googlePicker';
 import { scanTakeout } from '../import/takeout';
@@ -13,6 +14,7 @@ import type { PersonFilter, Photo, Segment, Stop } from '../model/types';
 import { activeJourney, addPhotosToJourney, createJourney, notify, setTool, useStore } from '../store';
 import { clusterPhotos } from '../trail/cluster';
 import { localDay } from '../trail/days';
+import { matchUnlocated } from '../trail/matchUnlocated';
 import { filterPhotos, hasLocation, peopleIndex } from '../trail/filter';
 import { newJourney, reconcileSegments } from '../trail/journey';
 import { findOutliers } from '../trail/outliers';
@@ -51,6 +53,7 @@ export function Wizard() {
   const [dateTo, setDateTo] = useState('');
   const [person, setPerson] = useState<PersonFilter>({ mode: 'any' });
   const [includeLoose, setIncludeLoose] = useState(true);
+  const [analyzeScenes, setAnalyzeScenes] = useState(false);
   const [target, setTarget] = useState<'new' | 'current'>('new');
   const [skipKinds, setSkipKinds] = useState<Set<PhotoKind>>(() => new Set(DEFAULT_SKIP));
   /** 0 keeps everything in one journey. */
@@ -70,6 +73,7 @@ export function Wizard() {
     setPerson({ mode: 'any' });
     setTarget('new');
     setSkipKinds(new Set(DEFAULT_SKIP));
+    setAnalyzeScenes(false);
     setGapDays(TRIP_GAP_DAYS);
     setFlipped(new Set());
     setUseHome(true);
@@ -194,21 +198,33 @@ export function Wizard() {
   const create = () =>
     withBusy('Preparing photos…', async () => {
       const photos = await materialize(chosen.flat(), (d, t) => setBusy(`Preparing photos… ${d} / ${t}`));
+      let embeddings: SceneEmbeddings | undefined;
+      let sceneAnalysisFailed = false;
+      if (analyzeScenes) {
+        setBusy('Loading on-device image model…');
+        try {
+          embeddings = await analyzePhotoScenes(photos, (d, t) => setBusy(`Analyzing scenes on this device… ${d} / ${t}`));
+        } catch {
+          sceneAnalysisFailed = true;
+        }
+      }
       await savePhotos(photos);
       const byId = new Map(photos.map((p) => [p.id, p]));
       let glitchCount = 0;
+      let visualMatchCount = 0;
       const build = (group: Photo[]) => {
-        let stops = clusterPhotos(group);
-        const loose = group.filter((p) => !hasLocation(p)).map((p) => p.id);
+        let stops = clusterPhotos(group, undefined, embeddings);
+        let glitchIds: string[] = [];
         // Photos whose GPS jumps far away and straight back are glitches: leave them unplaced.
         const glitches = findOutliers(stops);
         if (glitches.size) {
-          const moved = stops.filter((st) => glitches.has(st.id)).flatMap((st) => st.photoIds);
-          loose.push(...moved);
-          glitchCount += moved.length;
+          glitchIds = stops.filter((st) => glitches.has(st.id)).flatMap((st) => st.photoIds);
+          glitchCount += glitchIds.length;
           stops = stops.filter((st) => !glitches.has(st.id));
         }
-        return { stops, loose };
+        const matched = matchUnlocated(group, stops, embeddings);
+        visualMatchCount += matched.matched;
+        return { stops: matched.stops, loose: [...matched.looseIds, ...glitchIds] };
       };
       if (target === 'current' && current) {
         const { stops, loose } = build(photos);
@@ -239,6 +255,8 @@ export function Wizard() {
       if (glitchCount) {
         setTimeout(() => notify(`${glitchCount} photo${glitchCount === 1 ? '' : 's'} had suspicious GPS and ${glitchCount === 1 ? 'was' : 'were'} moved to “needs a place”`), 3800);
       }
+      if (sceneAnalysisFailed) setTimeout(() => notify('Image model could not load; places were grouped using GPS, time and image fingerprints'), 3800);
+      else if (visualMatchCount) setTimeout(() => notify(`Matched ${visualMatchCount} photo${visualMatchCount === 1 ? '' : 's'} without GPS to a stop using local image comparison`), 3800);
       close();
     });
 
@@ -434,6 +452,13 @@ export function Wizard() {
             <label className="flex items-center gap-2 text-sm text-slate-300">
               <input type="checkbox" checked={includeLoose} onChange={(e) => setIncludeLoose(e.target.checked)} />
               Include photos without location (placed along the trail by time)
+            </label>
+            <label className="flex items-start gap-2 text-sm text-slate-300">
+              <input type="checkbox" className="mt-1" checked={analyzeScenes} onChange={(e) => setAnalyzeScenes(e.target.checked)} />
+              <span>
+                Compare photo scenes on this device to improve stop grouping
+                <span className="mt-1 block text-xs text-slate-500">Downloads an approximately 90 MB image model on first use and caches it in this browser. Photos stay on this device. Clear matches to located photos can place otherwise unlocated photos; the model cannot identify a landmark from a picture alone.</span>
+              </span>
             </label>
             {target === 'new' && (
               <section>

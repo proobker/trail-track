@@ -41,6 +41,7 @@ Google shut down full-library access to Google Photos in March 2025, which is wh
 - **Undo / redo** for every edit (Ctrl+Z / Ctrl+Shift+Z).
 - **GPS glitch cleanup.** On import, a photo whose location jumps far away and straight back is set aside under "needs a place" instead of distorting the trail.
 - **Place grouping.** Nearby photos taken within two hours of each other form a stop. A small image fingerprint, calculated locally while making thumbnails, lets near-duplicate shots stay together when GPS drifts a little. This compares images; it does not identify a landmark or infer coordinates from a picture.
+- **Optional scene analysis.** During import, you can load a CLIP image model into the browser and compare selected photos on this device. Similar scenes can stay in one stop despite modest GPS drift. A photo without GPS can also join a stop when it clearly matches a located photo from the same visit; ambiguous matches remain under “Needs a place.” The approximately 90 MB model is downloaded on first use and cached by the browser; photo pixels are not uploaded. This cannot identify a named landmark from a picture alone.
 - **Photos without location** show as dashed thumbnails. Pin each one on the map, or attach it to the stop nearest in time.
 
 ## Journal
