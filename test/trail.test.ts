@@ -53,6 +53,28 @@ describe('clusterPhotos', () => {
     const stops = clusterPhotos([photo({ lat: 10, lng: 10, takenAt: T0 + H }), photo({ lat: 0, lng: 0, takenAt: T0 })]);
     expect(stops.map((s) => s.lat)).toEqual([0, 10]);
   });
+  it('keeps separate visits to the same coordinates on different days', () => {
+    const stops = clusterPhotos([
+      photo({ lat: 27.7172, lng: 85.324, takenAt: T0 }),
+      photo({ lat: 27.7172, lng: 85.324, takenAt: T0 + DAY_MS }),
+    ]);
+    expect(stops).toHaveLength(2);
+  });
+  it('separates nearby venues and does not drift through a chain of photos', () => {
+    const stops = clusterPhotos([
+      photo({ lat: 0, lng: 0, takenAt: T0 }),
+      photo({ lat: 0, lng: 0.0007, takenAt: T0 + 5 * 60_000 }),
+      photo({ lat: 0, lng: 0.0014, takenAt: T0 + 10 * 60_000 }),
+    ]);
+    expect(stops.map((s) => s.photoIds.length)).toEqual([2, 1]);
+  });
+  it('uses a local near-duplicate fingerprint to tolerate modest GPS drift', () => {
+    const first = photo({ lat: 0, lng: 0, visualHash: '0f0f0f0f0f0f0f0f', takenAt: T0 });
+    const duplicate = photo({ lat: 0, lng: 0.0013, visualHash: '0f0f0f0f0f0f0f0e', takenAt: T0 + 5 * 60_000 });
+    const different = photo({ lat: 0, lng: 0.0013, visualHash: 'f0f0f0f0f0f0f0f0', takenAt: T0 + 5 * 60_000 });
+    expect(clusterPhotos([first, duplicate])).toHaveLength(1);
+    expect(clusterPhotos([first, different])).toHaveLength(2);
+  });
 });
 
 describe('inferMode', () => {

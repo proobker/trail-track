@@ -24,6 +24,8 @@ export interface Photo {
   thumbBlob?: Blob;
   /** ~1280px, for the lightbox and playback cards. */
   previewBlob?: Blob;
+  /** Local difference hash of the image; only near-duplicate scenes are comparable. */
+  visualHash?: string;
 }
 
 export const MODES = ['walk', 'bike', 'car', 'bus', 'train', 'boat', 'flight'] as const;

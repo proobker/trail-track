@@ -40,6 +40,7 @@ Google shut down full-library access to Google Photos in March 2025, which is wh
   - Each stop's ⋯ menu can rename, reorder, merge with the next stop, split by time gap, or remove it.
 - **Undo / redo** for every edit (Ctrl+Z / Ctrl+Shift+Z).
 - **GPS glitch cleanup.** On import, a photo whose location jumps far away and straight back is set aside under "needs a place" instead of distorting the trail.
+- **Place grouping.** Nearby photos taken within two hours of each other form a stop. A small image fingerprint, calculated locally while making thumbnails, lets near-duplicate shots stay together when GPS drifts a little. This compares images; it does not identify a landmark or infer coordinates from a picture.
 - **Photos without location** show as dashed thumbnails. Pin each one on the map, or attach it to the stop nearest in time.
 
 ## Journal
