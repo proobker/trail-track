@@ -1,9 +1,9 @@
-import { ChevronLeft, ChevronRight, MapPin, Users, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, MapPin, Trash2, Users, X } from 'lucide-react';
 import { useEffect } from 'react';
 import { mapRef } from '../map/MapView';
 import { previewUrl, usePhoto } from '../model/photos';
 import { stopName } from '../model/types';
-import { activeJourney, useStore } from '../store';
+import { activeJourney, removePhotos, useStore } from '../store';
 
 export function Lightbox() {
   const lb = useStore((s) => s.lightbox);
@@ -12,6 +12,7 @@ export function Lightbox() {
   const photo = usePhoto(id);
   const stopIndex = j?.stops.findIndex((s) => id && s.photoIds.includes(id)) ?? -1;
   const stop = stopIndex >= 0 ? j!.stops[stopIndex] : undefined;
+  const inJourney = !!stop || (!!id && !!j?.loosePhotoIds?.includes(id));
 
   useEffect(() => {
     if (!lb) return;
@@ -66,6 +67,18 @@ export function Lightbox() {
           <span className="inline-flex items-center gap-1">
             <Users size={14} /> {photo.people.join(', ')}
           </span>
+        )}
+        {id && inJourney && (
+          <button
+            className="btn-ghost px-2 py-1 text-xs text-rose-200"
+            onClick={() => {
+              removePhotos([id]);
+              const rest = lb.photoIds.filter((x) => x !== id);
+              useStore.setState({ lightbox: rest.length ? { photoIds: rest, index: Math.min(lb.index, rest.length - 1) } : undefined });
+            }}
+          >
+            <Trash2 size={14} /> Remove from journey
+          </button>
         )}
         {stop && (
           <button

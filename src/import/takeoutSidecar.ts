@@ -6,6 +6,7 @@ export interface TakeoutSidecar {
   geoData?: { latitude?: number; longitude?: number };
   geoDataExif?: { latitude?: number; longitude?: number };
   people?: { name?: string }[];
+  googlePhotosOrigin?: { mobileUpload?: { deviceFolder?: { localFolderName?: string } } };
 }
 
 export interface SidecarInfo {
@@ -14,6 +15,7 @@ export interface SidecarInfo {
   lat?: number;
   lng?: number;
   people: string[];
+  folder?: string;
 }
 
 const validGeo = (g?: { latitude?: number; longitude?: number }) =>
@@ -32,6 +34,7 @@ export function parseSidecar(json: unknown): SidecarInfo | undefined {
     lat: geo?.latitude,
     lng: geo?.longitude,
     people: (s.people ?? []).map((p) => p.name?.trim()).filter((n): n is string => !!n),
+    folder: s.googlePhotosOrigin?.mobileUpload?.deviceFolder?.localFolderName || undefined,
   };
 }
 

@@ -11,6 +11,8 @@ export interface Photo {
   lng?: number;
   people: string[];
   fileName: string;
+  /** Phone folder the photo was uploaded from (Takeout only), e.g. "Screenshots" or "WhatsApp Images". */
+  folder?: string;
   /** ~256px, for map markers and lists. */
   thumbBlob?: Blob;
   /** ~1280px, for the lightbox and playback cards. */

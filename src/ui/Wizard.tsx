@@ -7,12 +7,18 @@ import { pickFromGooglePhotos } from '../import/googlePicker';
 import { scanTakeout } from '../import/takeout';
 import { parseTrackText, trackToJourney } from '../import/tracks';
 import { savePhotos } from '../model/photos';
-import type { PersonFilter, Segment, Stop } from '../model/types';
+import { JUNK_KINDS, KIND_LABEL, photoKind, type PhotoKind } from '../import/photoKind';
+import type { PersonFilter, Photo, Segment, Stop } from '../model/types';
 import { activeJourney, addPhotosToJourney, createJourney, notify, setTool, useStore } from '../store';
 import { clusterPhotos } from '../trail/cluster';
+import { localDay } from '../trail/days';
 import { filterPhotos, hasLocation, peopleIndex } from '../trail/filter';
 import { newJourney, reconcileSegments } from '../trail/journey';
 import { findOutliers } from '../trail/outliers';
+import { DAY_MS, rangeTitle, splitIntoTrips, TRIP_GAP_DAYS } from '../trail/trips';
+
+/** Chat images are often real trip photos from friends, so only the clear junk is left out by default. */
+const DEFAULT_SKIP: PhotoKind[] = ['screenshot', 'document', 'saved'];
 
 type Source = 'takeout' | 'upload' | 'picker' | 'track' | 'manual';
 
@@ -42,6 +48,11 @@ export function Wizard() {
   const [person, setPerson] = useState<PersonFilter>({ mode: 'any' });
   const [includeLoose, setIncludeLoose] = useState(true);
   const [target, setTarget] = useState<'new' | 'current'>('new');
+  const [skipKinds, setSkipKinds] = useState<Set<PhotoKind>>(() => new Set(DEFAULT_SKIP));
+  /** 0 keeps everything in one journey. */
+  const [gapDays, setGapDays] = useState(TRIP_GAP_DAYS);
+  /** Trips the user unticked, keyed by their first photo's id. */
+  const [skipTrips, setSkipTrips] = useState<Set<string>>(() => new Set());
 
   const reset = () => {
     setSource(undefined);
@@ -52,6 +63,9 @@ export function Wizard() {
     setDateTo('');
     setPerson({ mode: 'any' });
     setTarget('new');
+    setSkipKinds(new Set(DEFAULT_SKIP));
+    setGapDays(TRIP_GAP_DAYS);
+    setSkipTrips(new Set());
   };
   const close = () => {
     reset();
@@ -59,12 +73,27 @@ export function Wizard() {
   };
 
   const people = useMemo(() => (cands ? peopleIndex(cands.map((c) => c.photo)) : []), [cands]);
-  const matching = useMemo(() => {
+  const inRange = useMemo(() => {
     if (!cands) return [];
     const keep = new Set(filterPhotos(cands.map((c) => c.photo), { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined, person }).map((p) => p.id));
-    return cands.filter((c) => keep.has(c.photo.id));
+    return cands.filter((c) => keep.has(c.photo.id)).map((c) => ({ ...c, kind: photoKind(c.photo) }));
   }, [cands, dateFrom, dateTo, person]);
-  const located = matching.filter((c) => hasLocation(c.photo)).length;
+  const kindCounts = useMemo(() => {
+    const n = new Map<PhotoKind, number>();
+    for (const c of inRange) n.set(c.kind, (n.get(c.kind) ?? 0) + 1);
+    return n;
+  }, [inRange]);
+  const matching = useMemo(
+    () => inRange.filter((c) => !skipKinds.has(c.kind) && (includeLoose || hasLocation(c.photo))),
+    [inRange, skipKinds, includeLoose],
+  );
+  const trips = useMemo(
+    () => (target === 'new' && gapDays > 0 ? splitIntoTrips(matching, (c) => c.photo.takenAt, gapDays * DAY_MS) : [matching]),
+    [matching, target, gapDays],
+  );
+  const chosen = trips.filter((t) => t.length && !skipTrips.has(t[0].photo.id));
+  const chosenCount = chosen.reduce((n, t) => n + t.length, 0);
+  const located = chosen.reduce((n, t) => n + t.filter((c) => hasLocation(c.photo)).length, 0);
 
   if (!open) return null;
 
@@ -132,30 +161,60 @@ export function Wizard() {
 
   const create = () =>
     withBusy('Preparing photos…', async () => {
-      const keep = includeLoose ? matching : matching.filter((c) => hasLocation(c.photo));
-      const photos = await materialize(keep, (d, t) => setBusy(`Preparing photos… ${d} / ${t}`));
+      const photos = await materialize(chosen.flat(), (d, t) => setBusy(`Preparing photos… ${d} / ${t}`));
       await savePhotos(photos);
-      let stops = clusterPhotos(photos);
-      const loose = photos.filter((p) => !hasLocation(p)).map((p) => p.id);
-      // Photos whose GPS jumps far away and straight back are glitches: leave them unplaced.
-      const glitches = findOutliers(stops);
-      if (glitches.size) {
-        const moved = stops.filter((st) => glitches.has(st.id)).flatMap((st) => st.photoIds);
-        loose.push(...moved);
-        stops = stops.filter((st) => !glitches.has(st.id));
-        setTimeout(() => notify(`${moved.length} photo${moved.length === 1 ? '' : 's'} had suspicious GPS and ${moved.length === 1 ? 'was' : 'were'} moved to “needs a place”`), 3800);
-      }
+      const byId = new Map(photos.map((p) => [p.id, p]));
+      let glitchCount = 0;
+      const build = (group: Photo[]) => {
+        let stops = clusterPhotos(group);
+        const loose = group.filter((p) => !hasLocation(p)).map((p) => p.id);
+        // Photos whose GPS jumps far away and straight back are glitches: leave them unplaced.
+        const glitches = findOutliers(stops);
+        if (glitches.size) {
+          const moved = stops.filter((st) => glitches.has(st.id)).flatMap((st) => st.photoIds);
+          loose.push(...moved);
+          glitchCount += moved.length;
+          stops = stops.filter((st) => !glitches.has(st.id));
+        }
+        return { stops, loose };
+      };
       if (target === 'current' && current) {
+        const { stops, loose } = build(photos);
         addPhotosToJourney(stops, loose);
         notify(`Added ${photos.length} photos to ${current.title}`);
       } else {
-        const { segments, needsRouting } = reconcileSegments(stops, []);
-        const name = title || (dateFrom === dateTo ? new Date(`${dateFrom}T12:00`).toLocaleDateString(undefined, { dateStyle: 'long' }) : `${dateFrom} → ${dateTo}`);
-        await createJourney(newJourney(name, { dateFrom, dateTo, personFilter: person, stops, segments, loosePhotoIds: loose }), needsRouting);
-        notify(stops.length ? `Built a trail with ${stops.length} stops` : 'No photo had a location. Pin them on the map from the Photos tab.');
+        let stopCount = 0;
+        // Oldest first, so the newest trip ends up on top of the list and open.
+        for (const [i, trip] of chosen.entries()) {
+          const group = trip.map((c) => byId.get(c.photo.id)!);
+          const { stops, loose } = build(group);
+          stopCount += stops.length;
+          const { segments, needsRouting } = reconcileSegments(stops, []);
+          const many = chosen.length > 1;
+          const from = many ? localDay(trip[0].photo.takenAt) : dateFrom;
+          const to = many ? localDay(trip[trip.length - 1].photo.takenAt) : dateTo;
+          const name = title ? (many ? `${title} (${i + 1})` : title) : rangeTitle(from, to);
+          await createJourney(newJourney(name, { dateFrom: from, dateTo: to, personFilter: person, stops, segments, loosePhotoIds: loose }), needsRouting);
+        }
+        notify(
+          chosen.length > 1
+            ? `Built ${chosen.length} journeys, one per trip`
+            : stopCount
+              ? `Built a trail with ${stopCount} stops`
+              : 'No photo had a location. Pin them on the map from the Photos tab.',
+        );
+      }
+      if (glitchCount) {
+        setTimeout(() => notify(`${glitchCount} photo${glitchCount === 1 ? '' : 's'} had suspicious GPS and ${glitchCount === 1 ? 'was' : 'were'} moved to “needs a place”`), 3800);
       }
       close();
     });
+
+  const toggle = <T,>(s: Set<T>, v: T) => {
+    const next = new Set(s);
+    if (!next.delete(v)) next.add(v);
+    return next;
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm sm:p-4" onClick={(e) => e.target === e.currentTarget && !busy && close()}>
@@ -301,6 +360,20 @@ export function Wizard() {
                 </p>
               )}
             </section>
+            {JUNK_KINDS.some((k) => kindCounts.get(k)) && (
+              <section>
+                <h3 className="mb-2 text-sm font-medium text-slate-300">Leave out</h3>
+                <div className="flex flex-wrap gap-2">
+                  {JUNK_KINDS.filter((k) => kindCounts.get(k)).map((k) => (
+                    <label key={k} className={`btn-ghost cursor-pointer border border-white/10 ${skipKinds.has(k) ? 'active' : ''}`}>
+                      <input type="checkbox" className="sr-only" checked={skipKinds.has(k)} onChange={() => setSkipKinds((s) => toggle(s, k))} />
+                      {KIND_LABEL[k]} ({kindCounts.get(k)})
+                    </label>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-slate-500">Recognised from file names and the phone folder they came from. Anything missed can be removed later from the Photos tab.</p>
+              </section>
+            )}
             {current && (
               <section>
                 <h3 className="mb-2 text-sm font-medium text-slate-300">Add to</h3>
@@ -318,21 +391,59 @@ export function Wizard() {
               <input type="checkbox" checked={includeLoose} onChange={(e) => setIncludeLoose(e.target.checked)} />
               Include photos without location (placed along the trail by time)
             </label>
-            {target === 'new' && <input className="input" placeholder="Journey name (optional)" value={title} onChange={(e) => setTitle(e.target.value)} />}
+            {target === 'new' && (
+              <section>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-medium text-slate-300">{trips.length > 1 ? `${trips.length} trips` : 'Trips'}</h3>
+                  <label className="flex items-center gap-2 text-xs text-slate-400">
+                    New journey after
+                    <select className="input w-auto py-1 text-xs" value={gapDays} onChange={(e) => (setGapDays(Number(e.target.value)), setSkipTrips(new Set()))}>
+                      {[1, 2, 3, 7, 14].map((d) => (
+                        <option key={d} value={d}>
+                          {d}+ day{d === 1 ? '' : 's'} without photos
+                        </option>
+                      ))}
+                      <option value={0}>never (one journey)</option>
+                    </select>
+                  </label>
+                </div>
+                {trips.length > 1 ? (
+                  <ul className="max-h-48 space-y-1 overflow-y-auto rounded-xl bg-white/[0.03] p-1.5">
+                    {trips.map((t) => {
+                      const id = t[0].photo.id;
+                      const from = localDay(t[0].photo.takenAt);
+                      const to = localDay(t[t.length - 1].photo.takenAt);
+                      return (
+                        <li key={id}>
+                          <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-200 hover:bg-white/5">
+                            <input type="checkbox" checked={!skipTrips.has(id)} onChange={() => setSkipTrips((s) => toggle(s, id))} />
+                            <span className="flex-1">{rangeTitle(from, to)}</span>
+                            <span className="text-xs text-slate-500 tabular-nums">{t.length} photos</span>
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-slate-500">All photos are close together in time, so they make one journey.</p>
+                )}
+              </section>
+            )}
+            {target === 'new' && <input className="input" placeholder={chosen.length > 1 ? 'Name prefix (optional, default is the dates)' : 'Journey name (optional)'} value={title} onChange={(e) => setTitle(e.target.value)} />}
 
             <div className="flex items-center justify-between rounded-xl bg-white/5 p-4">
               <div className="text-sm">
-                <div className="font-display text-2xl text-white">{matching.length}</div>
+                <div className="font-display text-2xl text-white">{chosenCount}</div>
                 <div className="text-slate-400">
-                  photos · <span className="text-emerald-300">{located} with location</span> · {matching.length - located} without
+                  photos · <span className="text-emerald-300">{located} with location</span> · {chosenCount - located} without
                 </div>
               </div>
               <div className="flex gap-2">
                 <button className="btn-ghost" disabled={!!busy} onClick={reset}>
                   <ArrowLeft size={15} /> Back
                 </button>
-                <button className="btn-primary" disabled={!!busy || !(includeLoose ? matching.length : located)} onClick={create}>
-                  {target === 'current' ? 'Add photos' : 'Build trail'} →
+                <button className="btn-primary" disabled={!!busy || !chosenCount} onClick={create}>
+                  {target === 'current' ? 'Add photos' : chosen.length > 1 ? `Build ${chosen.length} journeys` : 'Build trail'} →
                 </button>
               </div>
             </div>

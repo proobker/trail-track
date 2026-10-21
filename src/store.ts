@@ -8,6 +8,7 @@ import { uid, type Journey, type Mode, type Segment, type Stop } from './model/t
 import { routeBetween } from './routing/route';
 import { mergeWithNext, splitStop as splitStopPure } from './trail/edit';
 import { reconcileSegments } from './trail/journey';
+import { splitJourney } from './trail/trips';
 
 export type Tool = 'view' | 'add' | 'draw' | 'pin';
 
@@ -341,6 +342,39 @@ export function addPhotosToJourney(stopsToAdd: Stop[], looseIds: string[]) {
   // Keep chronological order when every stop has a time; otherwise append.
   if (merged.every((s) => s.arrivedAt != null)) merged.sort((a, b) => a.arrivedAt! - b.arrivedAt!);
   setStops({ ...j, loosePhotoIds: [...(j.loosePhotoIds ?? []), ...looseIds] }, merged);
+}
+
+/** Takes photos off the active journey. Stops built only from those photos go too; hand-placed stops stay. */
+export function removePhotos(ids: string[]) {
+  const j = activeJourney();
+  if (!j || !ids.length) return;
+  const gone = new Set(ids);
+  const stops = j.stops
+    .map((s) => (s.photoIds.some((id) => gone.has(id)) ? { ...s, photoIds: s.photoIds.filter((id) => !gone.has(id)) } : s))
+    .filter((s) => s.photoIds.length || s.origin !== 'photo');
+  setStops({ ...j, loosePhotoIds: (j.loosePhotoIds ?? []).filter((id) => !gone.has(id)) }, stops);
+  if (get().selectedStopId && !stops.some((s) => s.id === get().selectedStopId)) set({ selectedStopId: undefined });
+  notify(`Removed ${ids.length} photo${ids.length === 1 ? '' : 's'}`, { label: 'Undo', run: undo });
+}
+
+/** Cuts the active journey into separate journeys before each of the given stop indexes. */
+export async function splitActiveJourney(cuts: number[]) {
+  const j = activeJourney();
+  if (!j || !cuts.length) return;
+  const loose = (await db.photos.bulkGet(j.loosePhotoIds ?? [])).filter((p) => !!p);
+  const takenAt = new Map(loose.map((p) => [p.id, p.takenAt]));
+  const [first, ...rest] = splitJourney(j, cuts, (id) => takenAt.get(id));
+  save(first);
+  await db.journeys.bulkPut(rest);
+  set((s) => ({ journeys: [...[...rest].reverse(), ...s.journeys], selectedStopId: undefined, selectedSegmentId: undefined }));
+  notify(`Split into ${rest.length + 1} journeys`, {
+    label: 'Undo',
+    run: async () => {
+      await db.journeys.bulkDelete(rest.map((r) => r.id));
+      set((s) => ({ journeys: s.journeys.filter((x) => !rest.some((r) => r.id === x.id)), activeId: j.id, view: 'journey' }));
+      restore(j);
+    },
+  });
 }
 
 export function setTool(tool: Tool, pinPhotoId?: string) {

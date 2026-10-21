@@ -79,6 +79,7 @@ export async function scanTakeout(files: File[], onProgress?: (msg: string) => v
         lng: info.lng,
         people: info.people,
         fileName: imageName ?? info.title ?? nameOf(j.path),
+        folder: info.folder,
       },
       getBlob: image?.readBlob,
     });
