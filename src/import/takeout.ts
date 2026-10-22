@@ -75,6 +75,7 @@ export async function scanTakeout(files: File[], onProgress?: (msg: string) => v
         id: uid(),
         source: 'takeout',
         takenAt: info.takenAt,
+        timeSource: info.timeSource,
         lat: info.lat,
         lng: info.lng,
         locationSource: info.locationSource,

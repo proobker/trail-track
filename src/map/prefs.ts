@@ -9,6 +9,8 @@ interface Prefs {
   sidebarOpen: boolean;
   /** Desktop: whether the journey panel is shown. */
   panelOpen: boolean;
+  /** Home set by the user; trips are the times away from it. Unset means it is detected from photos. */
+  home?: { lat: number; lng: number; name?: string };
 }
 
 const DEFAULTS: Prefs = { base: 'dark', terrain: false, globe: true, sidebarOpen: true, panelOpen: true };

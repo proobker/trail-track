@@ -28,3 +28,12 @@ it('retains embedded GPS when reading uploaded photos', async () => {
   expect(candidate.photo.lat).toBeCloseTo(27.7);
   expect(candidate.photo.lng).toBeCloseTo(85.3);
 });
+
+it('records where an uploaded photo’s time came from', async () => {
+  const [named, bare] = await scanUploads([
+    new File([gpsTiff()], 'IMG_20261017_120000.tif', { type: 'image/tiff' }),
+    new File([gpsTiff()], 'shared.tif', { type: 'image/tiff' }),
+  ]);
+  expect(named.photo.timeSource).toBe('filename');
+  expect(bare.photo.timeSource).toBe('file');
+});

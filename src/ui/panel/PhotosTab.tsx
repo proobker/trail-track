@@ -1,4 +1,4 @@
-import { Check, ImagePlus, Link2, MapPin, MapPinned, Trash2 } from 'lucide-react';
+import { Check, ImagePlus, Link2, MapPin, MapPinned, ScanSearch, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { JUNK_KINDS, KIND_LABEL, photoKind } from '../../import/photoKind';
 import { makeLocator, readTimelineFiles } from '../../import/timeline';
@@ -6,10 +6,14 @@ import { findTextHeavy } from '../../import/textHeavy';
 import { scanUploads } from '../../import/exifUpload';
 import { materialize } from '../../import/candidate';
 import { matchOriginals } from '../../trail/repair';
+import { nameStops, streetClipEngine } from '../../import/geolocate';
+import { candidateStopIds, inferPlaces, placeQueries, type PlaceSuggestion } from '../../trail/inferPlaces';
+import { matchUnlocated } from '../../trail/matchUnlocated';
+import { savePhotos } from '../../model/photos';
 import { restoreJourneyPhotos } from '../../store';
 import { thumbUrl } from '../../model/photos';
 import { stopName, type Journey, type Photo } from '../../model/types';
-import { attachLoose, notify, openLightbox, placeLoosePhotos, removePhotos, setTool, undo, useStore } from '../../store';
+import { applyInferredPlaces, attachLoose, notify, openLightbox, placeLoosePhotos, removePhotos, setTool, undo, useStore } from '../../store';
 import { pickFiles } from '../pickFiles';
 import { TimelineHelp } from '../TimelineHelp';
 
@@ -37,6 +41,8 @@ export function PhotosTab({ j, photos }: { j: Journey; photos: Map<string, Photo
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
   const [scanProgress, setScanProgress] = useState('');
+  const [placeProgress, setPlaceProgress] = useState('');
+  const [suggestions, setSuggestions] = useState<Map<string, PlaceSuggestion>>(() => new Map());
   const loose = (j.loosePhotoIds ?? []).map((id) => photos.get(id)).filter((p): p is Photo => !!p);
   const all = j.stops.flatMap((s) => s.photoIds);
   const nearestStop = (p: Photo) =>
@@ -112,6 +118,54 @@ export function PhotosTab({ j, photos }: { j: Journey; photos: Map<string, Photo
       setBusy(false);
     }
   };
+  const autoPlace = async (useModel: boolean) => {
+    setBusy(true);
+    setPlaceProgress(useModel ? 'Looking up place names…' : 'Placing photos…');
+    try {
+      const journeyPhotos = everyId.flatMap((id) => photos.get(id) ?? []);
+      if (!useModel) {
+        const result = inferPlaces(journeyPhotos, j.stops, { segments: j.segments, autoPin: true });
+        await applyInferredPlaces(j.id, result);
+        const n = result.updated.length;
+        notify(n ? `Placed ${n} photo${n === 1 ? '' : 's'}${result.counts.guess ? ` (${result.counts.guess} as rough guesses)` : ''}` : 'Nothing to place yet', n ? { label: 'Undo', run: undo } : undefined);
+        return;
+      }
+      // Photos a located shot already explains don't need the place model.
+      const unmatched = new Set(matchUnlocated(journeyPhotos, j.stops).looseIds);
+      const toRank = loose.filter((p) => unmatched.has(p.id));
+      streetClipEngine.preload?.();
+      // Place names are the choices the model picks from; only the ones some photo can use are looked up.
+      const stops = await nameStops(j.stops, (d, t) => setPlaceProgress(`Looking up place names… ${d} / ${t}`), candidateStopIds(toRank, j.stops));
+      const queries = placeQueries(toRank, stops);
+      setPlaceProgress('Loading on-device place model…');
+      const guesses = queries.length ? await streetClipEngine.rank(queries, (d, t) => setPlaceProgress(`Recognising places… ${d} / ${t}`)) : [];
+      const result = inferPlaces(journeyPhotos, stops, { segments: j.segments, queries, guesses, autoPin: true });
+      await applyInferredPlaces(j.id, result);
+      setSuggestions(new Map(result.suggestions.map((s) => [s.photoId, s])));
+      const n = result.updated.length;
+      notify(
+        n ? `Placed ${n} of ${loose.length} photos (${result.counts.ai} recognised, ${result.counts.time} by time, ${result.counts.visual} by a matching photo, ${result.counts.guess} rough guesses)` : result.suggestions.length ? 'No confident matches; unsure guesses are shown below' : 'No places found for these photos',
+        n ? { label: 'Undo', run: undo } : undefined,
+      );
+    } catch (e) {
+      notify((e as Error).message);
+    } finally {
+      setBusy(false);
+      setPlaceProgress('');
+      void streetClipEngine.release?.();
+    }
+  };
+  const acceptSuggestion = (p: Photo, s: PlaceSuggestion) => {
+    const stop = j.stops.find((x) => x.id === s.stopId);
+    if (!stop) return;
+    void savePhotos([{ ...p, lat: stop.lat, lng: stop.lng, locationSource: 'inferred-ai', placementScore: s.score }]);
+    attachLoose(p.id, stop.id);
+    setSuggestions((m) => {
+      const next = new Map(m);
+      next.delete(p.id);
+      return next;
+    });
+  };
   const open = (ids: string[], id: string) => (selecting ? pick(id) : openLightbox(ids, ids.indexOf(id)));
 
   return (
@@ -165,11 +219,26 @@ export function PhotosTab({ j, photos }: { j: Journey; photos: Map<string, Photo
                 <MapPinned size={14} /> {busy ? 'Reading your Timeline…' : 'Find places with Google Timeline'}
               </button>
               <TimelineHelp />
+              {j.stops.length > 0 && (
+                <button className="btn-ghost mt-2 w-full border border-emerald-400/30 py-1.5 text-xs text-emerald-100" disabled={busy} onClick={() => autoPlace(false)}>
+                  <MapPin size={14} /> {placeProgress || 'Place all automatically'}
+                </button>
+              )}
+              {j.stops.length > 1 && (
+                <>
+                  <button className="btn-ghost mt-2 w-full border border-white/10 py-1.5 text-xs" disabled={busy} onClick={() => autoPlace(true)}>
+                    <ScanSearch size={14} /> Place all with on-device AI
+                  </button>
+                  <p className="mt-1 text-[11px] leading-snug text-slate-500">Picks among this trip's places with the StreetCLIP model (about 430 MB, downloaded once; CC BY-NC 4.0). Photos stay on this device. File dates from shared copies are not used to place photos.</p>
+                </>
+              )}
             </div>
           )}
           <ul className="space-y-1.5">
             {loose.map((p) => {
               const near = j.stops.length ? nearestStop(p) : undefined;
+              const suggestion = suggestions.get(p.id);
+              const suggested = suggestion && j.stops.find((s) => s.id === suggestion.stopId);
               return (
                 <li key={p.id} className="flex items-center gap-3 rounded-xl bg-white/[0.03] p-1.5">
                   <div className="w-12 shrink-0">
@@ -178,6 +247,11 @@ export function PhotosTab({ j, photos }: { j: Journey; photos: Map<string, Photo
                   <div className="min-w-0 flex-1 text-xs">
                     <div className="truncate text-slate-200">{p.fileName}</div>
                     <div className="text-slate-500">{new Date(p.takenAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</div>
+                    {suggestion && suggested && !selecting && (
+                      <button className="mt-0.5 truncate text-left text-emerald-300 hover:underline" onClick={() => acceptSuggestion(p, suggestion)}>
+                        Looks like {stopName(suggested, j.stops.indexOf(suggested))} · {Math.round(suggestion.score * 100)}% — accept
+                      </button>
+                    )}
                   </div>
                   {!selecting && (
                     <>

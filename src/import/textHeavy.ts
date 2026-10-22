@@ -35,7 +35,10 @@ async function ocrImage(blob: Blob): Promise<{ image: Blob; width: number; heigh
   }
 }
 
-/** OCR runs in a browser worker. Only OCR code and language data are downloaded; images stay local. */
+/** OCR workers run in parallel; each holds its own copy of the language data, so keep the pool small. */
+const workerCount = () => Math.min(4, Math.max(1, Math.floor((navigator.hardwareConcurrency || 2) / 2)));
+
+/** OCR runs in browser workers. Only OCR code and language data are downloaded; images stay local. */
 export async function findTextHeavy(
   items: { id: string; getBlob: () => Promise<Blob | undefined> }[],
   onProgress?: (done: number, total: number) => void,
@@ -43,26 +46,33 @@ export async function findTextHeavy(
   const flagged = new Set<string>();
   if (!items.length) return flagged;
   const { createWorker } = await import('tesseract.js');
-  const worker = await createWorker('eng');
+  const workers = await Promise.all(Array.from({ length: Math.min(workerCount(), items.length) }, () => createWorker('eng')));
+  let next = 0;
   let scanned = 0;
-  try {
-    for (let i = 0; i < items.length; i++) {
+  let done = 0;
+  // One loop per worker, so only a few images are decoded at any time.
+  const run = async (worker: (typeof workers)[number]) => {
+    while (next < items.length) {
+      const item = items[next++];
       try {
-        const blob = await items[i].getBlob();
+        const blob = await item.getBlob();
         const input = blob && await ocrImage(blob);
         if (input) {
           const { data } = await worker.recognize(input.image, {}, { text: true, blocks: true });
           scanned++;
           const lines = (data.blocks ?? []).flatMap((block) => block.paragraphs.flatMap((paragraph) => paragraph.lines));
-          if (isTextHeavy(lines, input.width, input.height)) flagged.add(items[i].id);
+          if (isTextHeavy(lines, input.width, input.height)) flagged.add(item.id);
         }
       } catch {
         // Unreadable formats stay in the import for manual review.
       }
-      onProgress?.(i + 1, items.length);
+      onProgress?.(++done, items.length);
     }
+  };
+  try {
+    await Promise.all(workers.map(run));
   } finally {
-    await worker.terminate();
+    await Promise.all(workers.map((w) => w.terminate()));
   }
   if (!scanned) throw new Error('None of these photos could be scanned for text');
   return flagged;

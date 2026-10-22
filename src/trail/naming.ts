@@ -1,4 +1,5 @@
 import type { Journey } from '../model/types';
+import { matchTrek } from './treks';
 
 export const rangeTitle = (from: string, to: string) =>
   from === to ? new Date(`${from}T12:00`).toLocaleDateString(undefined, { dateStyle: 'long' }) : `${from} → ${to}`;
@@ -11,9 +12,11 @@ export function usesAutomaticTitle(j: Journey): boolean {
   return j.title === dated || j.title === `At home · ${dated}`;
 }
 
-/** Cities in visit order, falling back to named places or manually labelled stops. */
+/** A known trek's name when the stops follow one; otherwise cities in visit order, falling back to named places or manually labelled stops. */
 export function withJourneyTitle(j: Journey): Journey {
   if (!usesAutomaticTitle(j)) return j;
+  const trek = matchTrek(j.stops);
+  if (trek) return { ...j, autoTitle: true, title: trek.name };
   const names: string[] = [];
   const seen = new Set<string>();
   for (const stop of j.stops) {

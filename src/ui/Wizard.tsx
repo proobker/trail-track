@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { googleConfigured, signIn, useAuth } from '../auth/google';
 import { materialize, type PhotoCandidate } from '../import/candidate';
 import { analyzePhotoScenes, type SceneEmbeddings } from '../import/sceneAnalysis';
+import { nameStops, streetClipEngine, type PlaceGuess } from '../import/geolocate';
 import { scanUploads } from '../import/exifUpload';
 import { pickFromGooglePhotos } from '../import/googlePicker';
 import { scanTakeout } from '../import/takeout';
@@ -15,6 +16,7 @@ import type { PersonFilter, Photo, Segment, Stop } from '../model/types';
 import { activeJourney, addPhotosToJourney, createJourney, notify, setTool, useStore } from '../store';
 import { clusterPhotos } from '../trail/cluster';
 import { localDay } from '../trail/days';
+import { candidateStopIds, inferPlaces, placeQueries } from '../trail/inferPlaces';
 import { matchUnlocated } from '../trail/matchUnlocated';
 import { filterPhotos, hasLocation, peopleIndex } from '../trail/filter';
 import { newJourney, reconcileSegments } from '../trail/journey';
@@ -23,6 +25,8 @@ import { DAY_MS, findHome, groupTrips, rangeTitle, TRIP_GAP_DAYS } from '../trai
 import { reverseGeocode } from '../geo/reverse';
 import { pickFiles } from './pickFiles';
 import { TimelineHelp } from './TimelineHelp';
+import { HomePicker } from './HomePicker';
+import { usePrefs } from '../map/prefs';
 
 /** Chat images are often real trip photos from friends, so only the clear junk is left out by default. */
 const DEFAULT_SKIP: PhotoKind[] = ['screenshot', 'document', 'saved'];
@@ -55,6 +59,7 @@ export function Wizard() {
   const [person, setPerson] = useState<PersonFilter>({ mode: 'any' });
   const [includeLoose, setIncludeLoose] = useState(true);
   const [analyzeScenes, setAnalyzeScenes] = useState(false);
+  const [findPlaces, setFindPlaces] = useState(false);
   const [target, setTarget] = useState<'new' | 'current'>('new');
   const [skipKinds, setSkipKinds] = useState<Set<PhotoKind>>(() => new Set(DEFAULT_SKIP));
   const [textScan, setTextScan] = useState<{ key: string; flagged: Set<string>; kept: Set<string> }>();
@@ -108,7 +113,9 @@ export function Wizard() {
     [eligible, currentTextScan],
   );
   const detectedHome = useMemo(() => findHome(matching.map((c) => ({ t: c.photo.takenAt, lat: c.photo.lat, lng: c.photo.lng }))), [matching]);
-  const home = useHome ? detectedHome : undefined;
+  const savedHome = usePrefs((s) => s.home);
+  const [pickingHome, setPickingHome] = useState(false);
+  const home = useMemo(() => (useHome ? (savedHome ? { ...savedHome, days: 0 } : detectedHome) : undefined), [useHome, savedHome, detectedHome]);
   useEffect(() => {
     setHomeName(undefined);
     if (!detectedHome) return;
@@ -207,67 +214,103 @@ export function Wizard() {
 
   const create = () =>
     withBusy('Preparing photos…', async () => {
-      const photos = await materialize(chosen.flat(), (d, t) => setBusy(`Preparing photos… ${d} / ${t}`));
-      let embeddings: SceneEmbeddings | undefined;
-      let sceneAnalysisFailed = false;
-      if (analyzeScenes) {
-        setBusy('Loading on-device image model…');
-        try {
-          embeddings = await analyzePhotoScenes(photos, (d, t) => setBusy(`Analyzing scenes on this device… ${d} / ${t}`));
-        } catch {
-          sceneAnalysisFailed = true;
+      try {
+        const photos = await materialize(chosen.flat(), (d, t) => setBusy(`Preparing photos… ${d} / ${t}`));
+        let embeddings: SceneEmbeddings | undefined;
+        let sceneAnalysisFailed = false;
+        if (analyzeScenes) {
+          setBusy('Loading on-device image model…');
+          try {
+            embeddings = await analyzePhotoScenes(photos, (d, t) => setBusy(`Analyzing scenes on this device… ${d} / ${t}`));
+          } catch {
+            sceneAnalysisFailed = true;
+          }
         }
-      }
-      await savePhotos(photos);
-      const byId = new Map(photos.map((p) => [p.id, p]));
-      let glitchCount = 0;
-      let visualMatchCount = 0;
-      const build = (group: Photo[]) => {
-        let stops = clusterPhotos(group, undefined, embeddings);
-        let glitchIds: string[] = [];
-        // Photos whose GPS jumps far away and straight back are glitches: leave them unplaced.
-        const glitches = findOutliers(stops);
-        if (glitches.size) {
-          glitchIds = stops.filter((st) => glitches.has(st.id)).flatMap((st) => st.photoIds);
-          glitchCount += glitchIds.length;
-          stops = stops.filter((st) => !glitches.has(st.id));
+        await savePhotos(photos);
+        const byId = new Map(photos.map((p) => [p.id, p]));
+        let glitchCount = 0;
+        const placed = { visual: 0, ai: 0, time: 0, guess: 0 };
+        const inferred: Photo[] = [];
+        let placeModelFailed = false;
+        const build = async (group: Photo[]) => {
+          let stops = clusterPhotos(group, undefined, embeddings);
+          // Photos whose GPS jumps far away and straight back are glitches: place them like photos without GPS.
+          const glitches = findOutliers(stops);
+          if (glitches.size) {
+            const glitchIds = new Set(stops.filter((st) => glitches.has(st.id)).flatMap((st) => st.photoIds));
+            glitchCount += glitchIds.size;
+            stops = stops.filter((st) => !glitches.has(st.id));
+            group = group.map((p) => (glitchIds.has(p.id) ? { ...p, lat: undefined, lng: undefined } : p));
+          }
+          let queries;
+          let guesses: PlaceGuess[] | undefined;
+          // Photos a located shot already explains don't need the place model.
+          const unmatched = new Set(matchUnlocated(group, stops, embeddings).looseIds);
+          const toRank = group.filter((p) => hasLocation(p) || unmatched.has(p.id));
+          if (findPlaces && stops.length > 1 && unmatched.size) {
+            streetClipEngine.preload?.();
+            // Place names are the choices the model picks from; only the ones some photo can use are looked up.
+            stops = await nameStops(stops, (d, t) => setBusy(`Looking up place names… ${d} / ${t}`), candidateStopIds(toRank, stops));
+            queries = placeQueries(toRank, stops);
+            if (queries.length) {
+              setBusy('Loading on-device place model…');
+              try {
+                guesses = await streetClipEngine.rank(queries, (d, t) => setBusy(`Recognising places on this device… ${d} / ${t}`));
+              } catch {
+                placeModelFailed = true;
+              }
+            }
+          }
+          const result = inferPlaces(group, stops, { queries, guesses, embeddings, autoPin: true });
+          inferred.push(...result.updated);
+          placed.visual += result.counts.visual;
+          placed.ai += result.counts.ai;
+          placed.time += result.counts.time;
+          placed.guess += result.counts.guess;
+          return { stops: result.stops, loose: result.looseIds };
+        };
+        if (target === 'current' && current) {
+          const { stops, loose } = await build(photos);
+          addPhotosToJourney(stops, loose);
+          notify(`Added ${photos.length} photos to ${current.title}`);
+        } else {
+          let stopCount = 0;
+          // Oldest first, so the newest trip ends up on top of the list and open.
+          for (const [i, trip] of chosen.entries()) {
+            const group = trip.map((c) => byId.get(c.photo.id)!);
+            const { stops, loose } = await build(group);
+            stopCount += stops.length;
+            const { segments, needsRouting } = reconcileSegments(stops, []);
+            const many = chosen.length > 1;
+            const from = many ? localDay(trip[0].photo.takenAt) : dateFrom;
+            const to = many ? localDay(trip[trip.length - 1].photo.takenAt) : dateTo;
+            const name = title ? (many ? `${title} (${i + 1})` : title) : rangeTitle(from, to);
+            await createJourney(newJourney(name, { autoTitle: !title.trim(), dateFrom: from, dateTo: to, personFilter: person, stops, segments, loosePhotoIds: loose }), needsRouting);
+          }
+          notify(
+            chosen.length > 1
+              ? `Built ${chosen.length} journeys, one per trip`
+              : stopCount
+                ? `Built a trail with ${stopCount} stops`
+                : 'No photo had a location. Pin them on the map from the Photos tab.',
+          );
         }
-        const matched = matchUnlocated(group, stops, embeddings);
-        visualMatchCount += matched.matched;
-        return { stops: matched.stops, loose: [...matched.looseIds, ...glitchIds] };
-      };
-      if (target === 'current' && current) {
-        const { stops, loose } = build(photos);
-        addPhotosToJourney(stops, loose);
-        notify(`Added ${photos.length} photos to ${current.title}`);
-      } else {
-        let stopCount = 0;
-        // Oldest first, so the newest trip ends up on top of the list and open.
-        for (const [i, trip] of chosen.entries()) {
-          const group = trip.map((c) => byId.get(c.photo.id)!);
-          const { stops, loose } = build(group);
-          stopCount += stops.length;
-          const { segments, needsRouting } = reconcileSegments(stops, []);
-          const many = chosen.length > 1;
-          const from = many ? localDay(trip[0].photo.takenAt) : dateFrom;
-          const to = many ? localDay(trip[trip.length - 1].photo.takenAt) : dateTo;
-          const name = title ? (many ? `${title} (${i + 1})` : title) : rangeTitle(from, to);
-          await createJourney(newJourney(name, { autoTitle: !title.trim(), dateFrom: from, dateTo: to, personFilter: person, stops, segments, loosePhotoIds: loose }), needsRouting);
+        if (glitchCount) {
+          setTimeout(() => notify(`${glitchCount} photo${glitchCount === 1 ? '' : 's'} had suspicious GPS and ${glitchCount === 1 ? 'was' : 'were'} placed from the trail instead`), 3800);
         }
-        notify(
-          chosen.length > 1
-            ? `Built ${chosen.length} journeys, one per trip`
-            : stopCount
-              ? `Built a trail with ${stopCount} stops`
-              : 'No photo had a location. Pin them on the map from the Photos tab.',
-        );
+        if (inferred.length) await savePhotos(inferred);
+        if (sceneAnalysisFailed) setTimeout(() => notify('Image model could not load; places were grouped using GPS, time and image fingerprints'), 3800);
+        if (placeModelFailed) setTimeout(() => notify('Place model could not load; photos without GPS were placed by time where possible'), 3800);
+        const placedTotal = placed.visual + placed.ai + placed.time + placed.guess;
+        if (placedTotal) {
+          const parts = [placed.visual && `${placed.visual} by a matching photo`, placed.ai && `${placed.ai} by recognising the place`, placed.time && `${placed.time} by time`, placed.guess && `${placed.guess} as rough guesses`].filter(Boolean);
+          setTimeout(() => notify(`Placed ${placedTotal} photo${placedTotal === 1 ? '' : 's'} without GPS (${parts.join(', ')})`), 3800);
+        }
+        close();
+      } finally {
+        // The place model is shared by every trip in this import; free it once they are all built.
+        void streetClipEngine.release?.();
       }
-      if (glitchCount) {
-        setTimeout(() => notify(`${glitchCount} photo${glitchCount === 1 ? '' : 's'} had suspicious GPS and ${glitchCount === 1 ? 'was' : 'were'} moved to “needs a place”`), 3800);
-      }
-      if (sceneAnalysisFailed) setTimeout(() => notify('Image model could not load; places were grouped using GPS, time and image fingerprints'), 3800);
-      else if (visualMatchCount) setTimeout(() => notify(`Matched ${visualMatchCount} photo${visualMatchCount === 1 ? '' : 's'} without GPS to a stop using local image comparison`), 3800);
-      close();
     });
 
   const scanForText = () => withBusy('Loading on-device text scanner…', async () => {
@@ -495,6 +538,15 @@ export function Wizard() {
               <input type="checkbox" checked={includeLoose} onChange={(e) => setIncludeLoose(e.target.checked)} />
               Include photos without location (placed along the trail by time)
             </label>
+            {includeLoose && (
+              <label className="flex items-start gap-2 text-sm text-slate-300">
+                <input type="checkbox" className="mt-1" checked={findPlaces} onChange={(e) => setFindPlaces(e.target.checked)} />
+                <span>
+                  Recognise places for photos without GPS on this device
+                  <span className="mt-1 block text-xs text-slate-500">Downloads the StreetCLIP model (about 430 MB) on first use and caches it in this browser. It picks among the places already on your trip; photos stay on this device. File dates from shared or downloaded copies are not trusted for placement. Model licence: CC BY-NC 4.0.</span>
+                </span>
+              </label>
+            )}
             <label className="flex items-start gap-2 text-sm text-slate-300">
               <input type="checkbox" className="mt-1" checked={analyzeScenes} onChange={(e) => setAnalyzeScenes(e.target.checked)} />
               <span>
@@ -518,13 +570,34 @@ export function Wizard() {
                     </select>
                   </label>
                 </div>
-                {detectedHome && gapDays > 0 && (
-                  <label className="mb-2 flex items-start gap-2 text-xs leading-relaxed text-slate-400">
-                    <input type="checkbox" className="mt-0.5" checked={useHome} onChange={(e) => (setUseHome(e.target.checked), setFlipped(new Set()))} />
-                    <span>
-                      Home looks like <b className="text-slate-200">{homeName ?? 'your most photographed area'}</b> ({detectedHome.days} days of photos). Trips are the times you were away; everyday photos at home are left out unless you tick them.
-                    </span>
-                  </label>
+                {gapDays > 0 && (
+                  <div className="mb-2 space-y-2">
+                    {(savedHome || detectedHome) && (
+                      <label className="flex items-start gap-2 text-xs leading-relaxed text-slate-400">
+                        <input type="checkbox" className="mt-0.5" checked={useHome} onChange={(e) => (setUseHome(e.target.checked), setFlipped(new Set()))} />
+                        <span>
+                          {savedHome
+                            ? <>Home is <b className="text-slate-200">{savedHome.name ?? 'the place you set'}</b>.</>
+                            : <>Home looks like <b className="text-slate-200">{homeName ?? 'your most photographed area'}</b> ({detectedHome!.days} days of photos).</>}
+                          {' '}Trips are the times you were away; everyday photos at home are left out unless you tick them.
+                        </span>
+                      </label>
+                    )}
+                    {pickingHome ? (
+                      <HomePicker onDone={() => (setPickingHome(false), setUseHome(true), setFlipped(new Set()))} />
+                    ) : (
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                        <button className="text-emerald-300 hover:underline" onClick={() => setPickingHome(true)}>
+                          {savedHome || detectedHome ? 'Change home' : 'Set your home to split trips'}
+                        </button>
+                        {savedHome && (
+                          <button className="text-slate-400 hover:underline" onClick={() => (usePrefs.setState({ home: undefined }), setFlipped(new Set()))}>
+                            {detectedHome ? 'Detect from photos instead' : 'Clear home'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
                 {trips.length > 1 ? (
                   <ul className="max-h-56 space-y-1 overflow-y-auto rounded-xl bg-white/[0.03] p-1.5">

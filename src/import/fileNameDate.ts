@@ -13,8 +13,13 @@ const MIN_YEAR = 1990;
  * EXIF DateTimeOriginal). Names with a date but no time are placed at noon.
  */
 export function dateFromFileName(name: string): number | undefined {
+  return timeFromFileName(name)?.t;
+}
+
+/** Like dateFromFileName, but also says whether the name carried a time of day or only a date. */
+export function timeFromFileName(name: string): { t: number; hasTime: boolean } | undefined {
   const epoch = name.match(EPOCH_MS_RE);
-  if (epoch) return Number(epoch[0]);
+  if (epoch) return { t: Number(epoch[0]), hasTime: true };
   for (const m of name.matchAll(DATE_RE)) {
     const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
     const hasTime = m[4] != null;
@@ -23,7 +28,7 @@ export function dateFromFileName(name: string): number | undefined {
     const date = new Date(y, mo - 1, d, h, mi, s);
     // Reject impossible days like 20240231, which Date would roll into March.
     if (date.getMonth() !== mo - 1 || date.getDate() !== d) continue;
-    return date.getTime();
+    return { t: date.getTime(), hasTime };
   }
   return undefined;
 }

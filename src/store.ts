@@ -14,6 +14,7 @@ import { withJourneyTitle } from './trail/naming';
 import { repairJourneyDates } from './trail/repair';
 import { hasLocation } from './trail/filter';
 import type { TrailCandidate } from './trail/namedTrails';
+import type { InferResult } from './trail/inferPlaces';
 
 export type Tool = 'view' | 'add' | 'draw' | 'pin';
 
@@ -391,6 +392,15 @@ export async function placeLoosePhotos(placed: Photo[]) {
   // Keep chronological order when every stop has a time; otherwise append.
   if (merged.every((s) => s.arrivedAt != null)) merged.sort((a, b) => a.arrivedAt! - b.arrivedAt!);
   setStops({ ...j, loosePhotoIds: (j.loosePhotoIds ?? []).filter((id) => !ids.has(id)) }, merged);
+}
+
+/** Applies photo placements inferred for the given journey's loose photos (see trail/inferPlaces). */
+export async function applyInferredPlaces(journeyId: string, result: InferResult) {
+  const j = get().journeys.find((x) => x.id === journeyId);
+  if (!j || !result.updated.length) return;
+  await savePhotos(result.updated);
+  const placed = new Set(result.updated.map((p) => p.id));
+  setStops({ ...j, loosePhotoIds: (j.loosePhotoIds ?? []).filter((id) => !placed.has(id)) }, result.stops);
 }
 
 /** Restore previews/GPS in place, then map only the journey's previously loose photos. */

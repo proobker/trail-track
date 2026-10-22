@@ -12,6 +12,8 @@ export interface TakeoutSidecar {
 export interface SidecarInfo {
   title?: string;
   takenAt: number;
+  /** creationTime is when the photo was uploaded, not taken. */
+  timeSource: 'sidecar' | 'file';
   lat?: number;
   lng?: number;
   locationSource?: 'takeout-exif' | 'takeout-edited';
@@ -33,6 +35,7 @@ export function parseSidecar(json: unknown): SidecarInfo | undefined {
   return {
     title: s.title,
     takenAt: Number(ts) * 1000,
+    timeSource: s.photoTakenTime?.timestamp ? 'sidecar' : 'file',
     lat: geo?.latitude,
     lng: geo?.longitude,
     locationSource: geo ? (exif ? 'takeout-exif' : 'takeout-edited') : undefined,

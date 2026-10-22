@@ -27,6 +27,8 @@ Google shut down full-library access to Google Photos in March 2025, which is wh
 
 **Photos without a location** can be placed from your **Google Timeline**, either while importing or later from the Photos tab ("Find places with Google Timeline"). Export it on your phone (Android: Settings → Location → Location services → Timeline → Export Timeline data; iPhone: Google Maps → Settings → Personal content → Export Timeline data). Older Takeout `Records.json` and `Semantic Location History` files work too. A photo taken during a visit gets that place; otherwise it is interpolated along your path, and photos more than 45 minutes from any Timeline point stay unplaced. Camera times without a time zone are matched against the local time in the Timeline, so a camera on home time still lines up abroad.
 
+**Home.** When splitting a library into trips, home is detected from where you photograph most. To set it yourself, press **Set your home** / **Change home** in the import wizard and search for your town or use your current location. It is remembered in this browser.
+
 ## Editing a trail
 
 - **Transport mode per leg.** Click a leg's mode chip to change it.
@@ -43,11 +45,23 @@ Google shut down full-library access to Google Photos in March 2025, which is wh
 - **Place grouping.** Nearby photos taken within two hours of each other form a stop. A small image fingerprint, calculated locally while making thumbnails, lets near-duplicate shots stay together when GPS drifts a little. This compares images; it does not identify a landmark or infer coordinates from a picture.
 - **Optional scene analysis.** During import, you can load a CLIP image model into the browser and compare selected photos on this device. Similar scenes can stay in one stop despite modest GPS drift. A photo without GPS can also join a stop when it clearly matches a located photo from the same visit; ambiguous matches remain under “Needs a place.” The approximately 90 MB model is downloaded on first use and cached by the browser; photo pixels are not uploaded. This cannot identify a named landmark from a picture alone.
 - **Text-heavy image filter.** In the import wizard, choose **Find text-heavy photos** to scan selected images with on-device OCR. Likely documents, quote cards and text graphics are excluded from the trip preview, and each flagged filename can be kept before building the journey. For photos already imported, **Select text-heavy photos** in the Photos tab highlights matches for review before removal. The scan uses English OCR data downloaded on first use; a sign or a few words in a travel photo are kept.
-- **Photos without location** show as dashed thumbnails. Pin each one on the map, or attach it to the stop nearest in time.
+- **Photos without location** are placed in this order:
+  1. a clear visual match to a located photo;
+  2. on-device place recognition (optional, see below);
+  3. their time between the two stops around them, interpolated along the leg when the gap is six hours or less.
+  
+  If none of these is clear, the photo is still placed with the best weak clue (the model's unsure pick, its time, the most similar-looking stop, or the nearest stop in time) and labelled "Rough guess" in the photo viewer. GPS glitches are re-placed the same way. For older journeys, press **Place all automatically** in the Photos tab.
+- **Which times are trusted.** Shared and downloaded copies often lose EXIF, and their file date is just when they were saved. Times are used for placement only when they come from EXIF, Google Photos/Takeout's capture time, or a file name with a time of day (e.g. `PXL_20240512_093015123.jpg`). A file date or a date-only name (e.g. `IMG-20240512-WA0003.jpg`) is never used to interpolate. Such a photo is matched against the whole trip instead, and when it is placed it takes the stop's time (shown as "estimated" in the photo viewer).
+- **On-device place recognition.** Tick **Recognise places for photos without GPS** while importing, or press **Find places with on-device AI** in the Photos tab.
+  - It uses the [StreetCLIP](https://huggingface.co/onnx-community/StreetCLIP-ONNX) geolocation model, about 430 MB, downloaded once and cached by the browser. Photo pixels are not uploaded.
+  - It chooses among the places already on your trip: the stops around the photo's time when that time is trusted, otherwise every stop.
+  - Confident picks join that stop; unsure ones are offered as suggestions.
+  - StreetCLIP is licensed CC BY-NC 4.0 (non-commercial use).
 
 ## Journal
 
 - **Named trails:** In the Route tab, press "Find nearby trails" for a compact walking journey, or select a walking leg first to search around that leg. Preview OpenStreetMap candidates (plus USGS National Map trails in US areas), then confirm a name. Stops and sampled route points rank the suggestions. The existing route geometry stays intact. Large walking areas must be searched one leg at a time. Search results are cached locally for seven days.
+- **Trek names.** A journey that follows a well-known Nepal trek is titled after it, e.g. "Ama Yangri Trek", "Everest Base Camp Trek" or "Annapurna Circuit". The app has a built-in list of 29 treks with their main stops (coordinates from OpenStreetMap). A trek needs stops at two or more of its waypoints and a good share of the journey along its route. Names you typed yourself are never replaced.
 - Stops are named automatically from the place they're at (reverse geocoding via Photon), e.g. "Monastery of the Hieronymites · Lisbon, Portugal".
 - The route list is grouped by day.
 - Each stop can hold a note, which is also shown during playback.

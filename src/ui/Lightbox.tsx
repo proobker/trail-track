@@ -8,6 +8,8 @@ import { activeJourney, removePhotos, useStore } from '../store';
 const locationLabels = {
   exif: 'Photo GPS', 'takeout-exif': 'Original photo GPS', 'takeout-edited': 'Google Photos location',
   'timeline-path': 'Estimated from Timeline path', 'timeline-visit': 'Timeline visit', manual: 'Pinned on map',
+  'inferred-visual': 'Matched to a similar photo', 'inferred-ai': 'Place recognised on this device', 'inferred-time': 'Estimated from time between stops',
+  'inferred-guess': 'Rough guess',
 } as const;
 
 export function Lightbox() {
@@ -67,10 +69,11 @@ export function Lightbox() {
       </div>
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 p-4 text-sm text-slate-300" onClick={(e) => e.stopPropagation()}>
         {stop && <span className="font-medium text-white">{stopName(stop, stopIndex)}</span>}
-        {photo && <span>{new Date(photo.takenAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>}
+        {photo && <span>{new Date(photo.takenAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}{photo.timeEstimated ? ' (estimated)' : ''}</span>}
         {photo?.locationSource && (
           <span className="text-xs text-slate-400">
             {locationLabels[photo.locationSource]}
+            {photo.placementScore != null ? ` · ${Math.round(photo.placementScore * 100)}%` : ''}
             {photo.locationAccuracyM != null ? ` · reported ${Math.round(photo.locationAccuracyM)} m accuracy` : ''}
             {photo.locationTimeGapMs != null ? ` · ${Math.round(photo.locationTimeGapMs / 60_000)} min from observation` : ''}
           </span>

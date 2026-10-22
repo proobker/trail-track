@@ -1,7 +1,13 @@
 import type { LineString } from 'geojson';
 
 export type PhotoSource = 'takeout' | 'upload' | 'picker';
-export type LocationSource = 'exif' | 'takeout-exif' | 'takeout-edited' | 'timeline-path' | 'timeline-visit' | 'manual';
+export type LocationSource = 'exif' | 'takeout-exif' | 'takeout-edited' | 'timeline-path' | 'timeline-visit' | 'manual'
+  | 'inferred-visual' | 'inferred-ai' | 'inferred-time' | 'inferred-guess';
+/**
+ * Where `takenAt` came from. Shared or downloaded copies often lose EXIF, so a file time or a
+ * date-only file name says little about when the photo was really taken.
+ */
+export type TimeSource = 'exif-offset' | 'exif' | 'sidecar' | 'filename' | 'filename-date' | 'file';
 
 export interface Photo {
   id: string;
@@ -25,6 +31,12 @@ export interface Photo {
    * file-name date). It was read as if taken in this browser's zone.
    */
   wallClock?: boolean;
+  /** Older saved photos omit this and are treated as untrusted. */
+  timeSource?: TimeSource;
+  /** `takenAt` was copied from the stop the photo was placed at, not read from the photo. */
+  timeEstimated?: boolean;
+  /** Confidence (0–1) of an inferred location. */
+  placementScore?: number;
   /** Set when the location was filled in from Google Timeline rather than the photo itself. */
   locatedBy?: 'timeline';
   /** Phone folder the photo was uploaded from (Takeout only), e.g. "Screenshots" or "WhatsApp Images". */
@@ -36,6 +48,9 @@ export interface Photo {
   /** Local difference hash of the image; only near-duplicate scenes are comparable. */
   visualHash?: string;
 }
+
+const TRUSTED_TIME: ReadonlySet<TimeSource> = new Set(['exif-offset', 'exif', 'sidecar', 'filename']);
+export const trustedTime = (p: Photo) => p.timeSource != null && TRUSTED_TIME.has(p.timeSource) && !p.timeEstimated;
 
 export const MODES = ['walk', 'bike', 'car', 'bus', 'train', 'boat', 'flight'] as const;
 export type Mode = (typeof MODES)[number];

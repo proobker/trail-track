@@ -147,8 +147,8 @@ describe('matchUnlocated', () => {
   it('uses scene embeddings only when the match is clear and close in time', () => {
     const a = photo({ lat: 0, lng: 0, takenAt: T0 });
     const b = photo({ lat: 0, lng: 1, takenAt: T0 });
-    const missing = photo({ takenAt: T0 + 5 * 60_000 });
-    const late = photo({ takenAt: T0 + DAY_MS });
+    const missing = photo({ takenAt: T0 + 5 * 60_000, timeSource: 'exif' });
+    const late = photo({ takenAt: T0 + DAY_MS, timeSource: 'exif' });
     const s1 = stop({ photoIds: [a.id], arrivedAt: T0 });
     const s2 = stop({ photoIds: [b.id], arrivedAt: T0 });
     const embeddings = new Map([
@@ -162,6 +162,15 @@ describe('matchUnlocated', () => {
     expect(result.looseIds).toEqual([late.id]);
     embeddings.set(b.id, new Float32Array([1, 0]));
     expect(matchUnlocated([a, b, missing], [s1, s2], embeddings).looseIds).toEqual([missing.id]);
+  });
+  it('searches the whole trip when the time is a file date', () => {
+    const a = photo({ lat: 0, lng: 0, takenAt: T0 });
+    const shared = photo({ takenAt: T0 + 30 * DAY_MS, timeSource: 'file' });
+    const embeddings = new Map([[a.id, new Float32Array([1, 0])], [shared.id, new Float32Array([0.99, Math.sqrt(1 - 0.99 ** 2)])]]);
+    expect(matchUnlocated([a, shared], [stop({ photoIds: [a.id], arrivedAt: T0 })], embeddings).matched).toBe(1);
+    // Below the stricter untimed threshold.
+    embeddings.set(shared.id, new Float32Array([0.95, Math.sqrt(1 - 0.95 ** 2)]));
+    expect(matchUnlocated([a, shared], [stop({ photoIds: [a.id], arrivedAt: T0 })], embeddings).matched).toBe(0);
   });
 });
 

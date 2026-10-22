@@ -5,7 +5,7 @@ import { useEffect, useRef } from 'react';
 import type { FeatureCollection } from 'geojson';
 import { buildTimeline, frameTime, sample, type Timeline } from '../animate/timeline';
 import { getPhoto, thumbUrl, useJourneyPhotos } from '../model/photos';
-import { MODE_META, stopName, type Journey, type Mode, type Photo } from '../model/types';
+import { MODE_META, stopName, trustedTime, type Journey, type Mode, type Photo } from '../model/types';
 import { activeJourney, addDraftPoint, addStop, moveStop, notify, openLightbox, pinPhoto, selectJourney, setPlayer, setTool, useStore } from '../store';
 import { placeUnlocated } from '../trail/placeUnlocated';
 import { modeSvg } from '../ui/icons';
@@ -378,7 +378,9 @@ export function MapView() {
     });
 
     const loose = (journey.loosePhotoIds ?? []).map((id) => photos.get(id)).filter((p): p is Photo => !!p);
-    for (const pl of placeUnlocated(loose, journey)) {
+    // A file date (e.g. a shared copy's download time) says nothing about where the photo belongs.
+    // Photos saved before time sources were recorded keep their old approximate marker.
+    for (const pl of placeUnlocated(loose.filter((p) => p.timeSource == null || trustedTime(p)), journey)) {
       const p = photos.get(pl.photoId);
       const el = document.createElement('button');
       el.className = 'loose-marker';
